@@ -1,0 +1,86 @@
+name: Build Zygisk Module
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag (optional, auto if empty)"
+        required: false
+        type: string
+  push:
+    paths:
+      - "module/**"
+      - ".github/workflows/build-zygisk.yml"
+      - "module.prop"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "ndk;26.3.11579264"
+
+      - name: Build arm64 zygisk library
+        run: |
+          export NDK="$ANDROID_SDK_ROOT/ndk/26.3.11579264"
+          cd module/jni
+          "$NDK/ndk-build" NDK_PROJECT_PATH=. APP_BUILD_SCRIPT=Android.mk NDK_APPLICATION_MK=Application.mk -j4
+          ls -lah libs/arm64-v8a
+
+      - name: Package magisk module zip
+        run: |
+          mkdir -p out/stage/zygisk
+          cp module.prop out/stage/module.prop
+          cp module/jni/libs/arm64-v8a/libhsahc_zygisk.so out/stage/zygisk/arm64-v8a.so
+          cd out/stage
+          zip -r ../hsahc_forceupdate_zygisk.zip ./*
+          cd ..
+          ls -lah
+          sha256sum hsahc_forceupdate_zygisk.zip > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hsahc-forceupdate-zygisk
+          path: |
+            out/hsahc_forceupdate_zygisk.zip
+            out/SHA256SUMS.txt
+          if-no-files-found: error
+
+      - name: Setup release metadata
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          TAG="${{ github.event.inputs.release_tag }}"
+          if [ -z "${TAG}" ]; then
+            TAG="zygisk-${GITHUB_RUN_NUMBER}"
+          fi
+          echo "RELEASE_TAG=${TAG}" >> "${GITHUB_ENV}"
+          echo "RELEASE_NAME=HSAHC Zygisk ${TAG}" >> "${GITHUB_ENV}"
+
+      - name: Publish release assets
+        if: github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: ${{ env.RELEASE_NAME }}
+          target_commitish: ${{ github.sha }}
+          prerelease: true
+          files: |
+            out/hsahc_forceupdate_zygisk.zip
+            out/SHA256SUMS.txt
