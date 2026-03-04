@@ -47,7 +47,7 @@ $ZygiskDir = Join-Path $StageDir "zygisk"
 $MetaInfSrc = Join-Path $Root "META-INF"
 $MetaInfDst = Join-Path $StageDir "META-INF"
 $CustomizeSrc = Join-Path $Root "customize.sh"
-$AbiList = @("arm64-v8a", "armeabi-v7a")
+$AbiList = @("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
 
 if (!(Test-Path $MetaInfSrc)) {
   throw "META-INF not found: $MetaInfSrc"

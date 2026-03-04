@@ -11,7 +11,7 @@
 - `VersionCompare` -> 强制返回 `0`
 - `ConfirmVersionForceUpdateJumpCallback` -> 空实现（no-op）
 
-已内置双 ABI：`arm64-v8a` 与 `armeabi-v7a`。
+已内置四 ABI：`arm64-v8a`、`armeabi-v7a`、`x86_64`、`x86`。
 
 ## 本地构建（Windows）
 

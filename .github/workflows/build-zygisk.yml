@@ -38,13 +38,15 @@ jobs:
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "ndk;26.3.11579264"
 
-      - name: Build arm64 zygisk library
+      - name: Build zygisk libraries
         run: |
           export NDK="$ANDROID_SDK_ROOT/ndk/26.3.11579264"
           cd module/jni
           "$NDK/ndk-build" NDK_PROJECT_PATH=. APP_BUILD_SCRIPT=Android.mk NDK_APPLICATION_MK=Application.mk -j4
           ls -lah libs/arm64-v8a
           ls -lah libs/armeabi-v7a
+          ls -lah libs/x86_64
+          ls -lah libs/x86
 
       - name: Package magisk module zip
         run: |
@@ -55,6 +57,8 @@ jobs:
           cp -r META-INF/com out/stage/META-INF/com
           cp module/jni/libs/arm64-v8a/libhsahc_zygisk.so out/stage/zygisk/arm64-v8a.so
           cp module/jni/libs/armeabi-v7a/libhsahc_zygisk.so out/stage/zygisk/armeabi-v7a.so
+          cp module/jni/libs/x86_64/libhsahc_zygisk.so out/stage/zygisk/x86_64.so
+          cp module/jni/libs/x86/libhsahc_zygisk.so out/stage/zygisk/x86.so
           test -f out/stage/META-INF/com/google/android/update-binary
           test -f out/stage/META-INF/com/google/android/updater-script
           cd out/stage
@@ -65,6 +69,8 @@ jobs:
           unzip -l hsahc_forceupdate_zygisk.zip | grep -q "META-INF/com/google/android/updater-script"
           unzip -l hsahc_forceupdate_zygisk.zip | grep -q "zygisk/arm64-v8a.so"
           unzip -l hsahc_forceupdate_zygisk.zip | grep -q "zygisk/armeabi-v7a.so"
+          unzip -l hsahc_forceupdate_zygisk.zip | grep -q "zygisk/x86_64.so"
+          unzip -l hsahc_forceupdate_zygisk.zip | grep -q "zygisk/x86.so"
           ls -lah
           sha256sum hsahc_forceupdate_zygisk.zip > SHA256SUMS.txt
           cat SHA256SUMS.txt
