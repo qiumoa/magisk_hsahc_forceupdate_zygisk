@@ -45,11 +45,12 @@ adb logcat | grep hsahc-zygisk
 
 文件日志（模块自动写入）：
 
-- `/data/adb/hsahc_forceupdate_zygisk/runtime.log`
-- 回退路径：`/data/user/0/com.lta.hsahc.aligames/files/hsahc_zygisk.log`
+- `/data/user/0/com.lta.hsahc.aligames/files/hsahc_zygisk.log`（优先）
+- `/data/adb/hsahc_forceupdate_zygisk/runtime.log`（回退）
+- `/data/adb/hsahc_forceupdate_zygisk/last_process.log`（记录注入到的进程名）
 
 查看文件日志：
 
 ```bash
-adb shell su -c "tail -n 200 /data/adb/hsahc_forceupdate_zygisk/runtime.log"
+adb shell su -c "tail -n 200 /data/user/0/com.lta.hsahc.aligames/files/hsahc_zygisk.log"
 ```

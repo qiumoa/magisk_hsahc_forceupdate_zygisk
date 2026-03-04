@@ -2,17 +2,17 @@
 #include <dlfcn.h>
 #include <jni.h>
 #include <pthread.h>
+
+#include <errno.h>
 #include <fcntl.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
-#include <errno.h>
-
-#include <stdint.h>
-#include <string.h>
 
 #include "zygisk.hpp"
 
@@ -25,12 +25,37 @@ namespace {
 constexpr const char *kLogTag = "hsahc-zygisk";
 constexpr const char *kTargetProcess = "com.lta.hsahc.aligames";
 constexpr const char *kIl2cppSo = "libil2cpp.so";
+
 constexpr const char *kLogDir = "/data/adb/hsahc_forceupdate_zygisk";
-constexpr const char *kLogPath = "/data/adb/hsahc_forceupdate_zygisk/runtime.log";
-constexpr const char *kFallbackLogPath = "/data/user/0/com.lta.hsahc.aligames/files/hsahc_zygisk.log";
+constexpr const char *kAdbLogPath = "/data/adb/hsahc_forceupdate_zygisk/runtime.log";
+constexpr const char *kAppLogPath = "/data/user/0/com.lta.hsahc.aligames/files/hsahc_zygisk.log";
+constexpr const char *kLastProcPath = "/data/adb/hsahc_forceupdate_zygisk/last_process.log";
+
 constexpr int kMaxRetry = 180;
 constexpr int kRetrySleepSec = 1;
+
 int gLogFd = -1;
+int gLastProcFd = -1;
+
+void writeLineFd(int fd, const char *line) {
+  if (fd < 0 || line == nullptr) {
+    return;
+  }
+  size_t n = strlen(line);
+  if (n > 0) {
+    write(fd, line, n);
+  }
+}
+
+void appendTimePrefix(char *out, size_t outSize) {
+  if (out == nullptr || outSize == 0) {
+    return;
+  }
+  time_t now = time(nullptr);
+  struct tm tmv {};
+  localtime_r(&now, &tmv);
+  strftime(out, outSize, "%Y-%m-%d %H:%M:%S", &tmv);
+}
 
 void writeFileLog(const char *level, const char *message) {
   if (gLogFd < 0 || level == nullptr || message == nullptr) {
@@ -38,15 +63,12 @@ void writeFileLog(const char *level, const char *message) {
   }
 
   char timebuf[32] = {0};
-  time_t now = time(nullptr);
-  struct tm tmv {};
-  localtime_r(&now, &tmv);
-  strftime(timebuf, sizeof(timebuf), "%Y-%m-%d %H:%M:%S", &tmv);
+  appendTimePrefix(timebuf, sizeof(timebuf));
 
   char line[2300] = {0};
   int n = snprintf(line, sizeof(line), "%s [%s] %s\n", timebuf, level, message);
   if (n > 0) {
-    write(gLogFd, line, static_cast<size_t>(n));
+    writeLineFd(gLogFd, line);
   }
 }
 
@@ -64,21 +86,58 @@ void logPrint(int prio, const char *level, const char *fmt, ...) {
 #define LOGI(...) logPrint(ANDROID_LOG_INFO, "信息", __VA_ARGS__)
 #define LOGE(...) logPrint(ANDROID_LOG_ERROR, "错误", __VA_ARGS__)
 
+bool isTargetProcess(const char *name) {
+  if (name == nullptr) {
+    return false;
+  }
+
+  // 兼容主进程、:子进程、以及少量厂商后缀命名
+  size_t n = strlen(kTargetProcess);
+  if (strncmp(name, kTargetProcess, n) != 0) {
+    return false;
+  }
+  char tail = name[n];
+  return tail == '\0' || tail == ':' || tail == '.';
+}
+
+void recordLastProcess(const char *name, bool target) {
+  if (name == nullptr || name[0] == '\0') {
+    return;
+  }
+  if (gLastProcFd < 0) {
+    mkdir(kLogDir, 0755);
+    gLastProcFd = open(kLastProcPath, O_CREAT | O_WRONLY | O_APPEND | O_CLOEXEC, 0644);
+  }
+  if (gLastProcFd < 0) {
+    return;
+  }
+
+  char timebuf[32] = {0};
+  appendTimePrefix(timebuf, sizeof(timebuf));
+
+  char line[640] = {0};
+  int n = snprintf(line, sizeof(line), "%s name=%s target=%s\n", timebuf, name, target ? "1" : "0");
+  if (n > 0) {
+    writeLineFd(gLastProcFd, line);
+  }
+}
+
 void ensureLogFileReady() {
   if (gLogFd >= 0) {
     return;
   }
 
-  mkdir(kLogDir, 0755);
-  gLogFd = open(kLogPath, O_CREAT | O_WRONLY | O_APPEND | O_CLOEXEC, 0644);
+  // 优先使用目标应用私有目录，避免zygote上下文写/data/adb被SELinux拒绝
+  gLogFd = open(kAppLogPath, O_CREAT | O_WRONLY | O_APPEND | O_CLOEXEC, 0644);
   if (gLogFd >= 0) {
-    LOGI("日志文件已打开: %s", kLogPath);
+    LOGI("日志文件已打开: %s", kAppLogPath);
     return;
   }
 
-  gLogFd = open(kFallbackLogPath, O_CREAT | O_WRONLY | O_APPEND | O_CLOEXEC, 0644);
+  mkdir(kLogDir, 0755);
+  gLogFd = open(kAdbLogPath, O_CREAT | O_WRONLY | O_APPEND | O_CLOEXEC, 0644);
   if (gLogFd >= 0) {
-    LOGI("日志文件已打开(回退路径): %s", kFallbackLogPath);
+    LOGI("日志文件已打开(回退路径): %s", kAdbLogPath);
     return;
   }
 
@@ -118,6 +177,12 @@ struct MethodInfoPatch {
   void *virtualMethodPointer;
 };
 
+enum ReplaceAction : int {
+  kReturnFalse = 0,
+  kReturnZero = 1,
+  kReturnVoid = 2,
+};
+
 struct TargetSpec {
   const char *method;
   const char *classKeyword;
@@ -129,16 +194,11 @@ extern "C" bool ret_false_stub(...) { return false; }
 extern "C" int ret_zero_stub(...) { return 0; }
 extern "C" void ret_void_stub(...) {}
 
-enum ReplaceAction : int {
-  kReturnFalse = 0,
-  kReturnZero = 1,
-  kReturnVoid = 2,
-};
-
 TargetSpec gTargets[] = {
-  {"IsVersionLessThanTargetVersion", "GameMgr", kReturnFalse, 0},
-  {"VersionCompare", "GameMgr", kReturnZero, 0},
-  {"ConfirmVersionForceUpdateJumpCallback", "GameMgr", kReturnVoid, 0},
+    {"IsVersionLessThanTargetVersion", "GameMgr", kReturnFalse, 0},
+    {"VersionCompare", "GameMgr", kReturnZero, 0},
+    {"ConfirmVersionForceUpdateJumpCallback", "GameMgr", kReturnVoid, 0},
+    {"VersionForceUpdateJump", "GameMgr", kReturnVoid, 0},
 };
 
 void *resolveActionPtr(int action) {
@@ -160,24 +220,24 @@ bool makeWritable(void *addr) {
     return false;
   }
   uintptr_t page = reinterpret_cast<uintptr_t>(addr) & ~(static_cast<uintptr_t>(pageSize) - 1U);
-  if (mprotect(reinterpret_cast<void *>(page), static_cast<size_t>(pageSize), PROT_READ | PROT_WRITE | PROT_EXEC) != 0) {
-    return false;
-  }
-  return true;
+  return mprotect(reinterpret_cast<void *>(page), static_cast<size_t>(pageSize),
+                  PROT_READ | PROT_WRITE | PROT_EXEC) == 0;
 }
 
-bool patchMethodPointer(const void *methodInfo, void *replace, const char *klass, const char *method, uint32_t paramCount) {
+bool patchMethodPointer(const void *methodInfo, void *replace, const char *klass, const char *method,
+                        uint32_t paramCount) {
   auto *m = reinterpret_cast<MethodInfoPatch *>(const_cast<void *>(methodInfo));
-  if (m == nullptr || m->methodPointer == nullptr) {
+  if (m == nullptr || m->methodPointer == nullptr || replace == nullptr) {
     return false;
   }
   if (m->methodPointer == replace) {
-    return true;
-  }
-  if (!makeWritable(m)) {
-    LOGE("mprotect 失败: %s::%s", klass, method);
     return false;
   }
+  if (!makeWritable(m)) {
+    LOGE("mprotect失败: %s::%s", klass, method);
+    return false;
+  }
+
   void *old = m->methodPointer;
   m->methodPointer = replace;
   if (m->virtualMethodPointer != nullptr) {
@@ -197,7 +257,7 @@ bool resolveIl2cpp(Il2CppApi &api) {
   auto resolveFn = [&](const char *sym, void **out) -> bool {
     void *p = dlsym(h, sym);
     if (p == nullptr) {
-      LOGE("缺少 il2cpp 导出符号: %s", sym);
+      LOGE("缺少il2cpp导出符号: %s", sym);
       return false;
     }
     memcpy(out, &p, sizeof(p));
@@ -215,19 +275,20 @@ bool resolveIl2cpp(Il2CppApi &api) {
   if (!resolveFn("il2cpp_class_get_namespace", reinterpret_cast<void **>(&api.class_get_namespace))) return false;
   if (!resolveFn("il2cpp_class_get_methods", reinterpret_cast<void **>(&api.class_get_methods))) return false;
   if (!resolveFn("il2cpp_method_get_name", reinterpret_cast<void **>(&api.method_get_name))) return false;
-  if (!resolveFn("il2cpp_method_get_param_count", reinterpret_cast<void **>(&api.method_get_param_count))) return false;
+  if (!resolveFn("il2cpp_method_get_param_count", reinterpret_cast<void **>(&api.method_get_param_count)))
+    return false;
 
   return true;
 }
 
-bool classMatch(const char *klass, const char *ns, const char *keyword) {
+bool classMatch(const char *klass, const char *nameSpace, const char *keyword) {
   if (keyword == nullptr || keyword[0] == '\0') {
     return true;
   }
   if (klass != nullptr && strstr(klass, keyword) != nullptr) {
     return true;
   }
-  if (ns != nullptr && strstr(ns, keyword) != nullptr) {
+  if (nameSpace != nullptr && strstr(nameSpace, keyword) != nullptr) {
     return true;
   }
   return false;
@@ -290,9 +351,6 @@ int patchTargets(Il2CppApi &api, bool strictClass) {
             continue;
           }
           void *replace = resolveActionPtr(t.action);
-          if (replace == nullptr) {
-            continue;
-          }
           if (patchMethodPointer(methodInfo, replace, klassName ? klassName : "<null>", methodName, paramCount)) {
             t.hitCount++;
             patched++;
@@ -320,21 +378,21 @@ void *workerThread(void *) {
 
     int total = strictPatched + fallbackPatched;
     if (total > 0) {
-      LOGI("il2cpp 强更绕过已生效, 命中总数=%d (严格匹配=%d, 回退匹配=%d)", total, strictPatched, fallbackPatched);
+      LOGI("il2cpp强更绕过已生效: 总命中=%d (严格=%d, 回退=%d)", total, strictPatched, fallbackPatched);
       return nullptr;
     }
 
     sleep(kRetrySleepSec);
   }
 
-  LOGE("在超时窗口内未能补丁 il2cpp 目标方法");
+  LOGE("超时: 未在窗口内补丁到il2cpp目标方法");
   return nullptr;
 }
 
 }  // namespace
 
 class HsahcZygiskModule : public zygisk::ModuleBase {
-public:
+ public:
   void onLoad(Api *api, JNIEnv *env) override {
     api_ = api;
     env_ = env;
@@ -342,43 +400,54 @@ public:
 
   void preAppSpecialize(AppSpecializeArgs *args) override {
     target_ = false;
-    if (args != nullptr && args->nice_name != nullptr) {
+    proc_name_[0] = '\0';
+
+    if (args != nullptr && args->nice_name != nullptr && env_ != nullptr) {
       const char *name = env_->GetStringUTFChars(args->nice_name, nullptr);
       if (name != nullptr) {
-        target_ = (strcmp(name, kTargetProcess) == 0);
+        strncpy(proc_name_, name, sizeof(proc_name_) - 1);
+        proc_name_[sizeof(proc_name_) - 1] = '\0';
+        target_ = isTargetProcess(name) || (strstr(name, kTargetProcess) != nullptr);
+        recordLastProcess(name, target_);
         env_->ReleaseStringUTFChars(args->nice_name, name);
       }
     }
+
     if (!target_) {
       api_->setOption(zygisk::Option::DLCLOSE_MODULE_LIBRARY);
-    } else {
-      ensureLogFileReady();
-      LOGI("命中目标进程，开始准备 il2cpp 补丁");
+      return;
     }
+
+    __android_log_print(ANDROID_LOG_INFO, kLogTag, "命中目标进程: %s", proc_name_[0] ? proc_name_ : "<unknown>");
   }
 
   void postAppSpecialize(const AppSpecializeArgs *args) override {
-    (void) args;
+    (void)args;
     if (!target_) {
       return;
     }
+
+    ensureLogFileReady();
+    LOGI("开始补丁进程: %s", proc_name_[0] ? proc_name_ : "<unknown>");
+
     pthread_t t{};
     if (pthread_create(&t, nullptr, workerThread, nullptr) == 0) {
       pthread_detach(t);
     } else {
-      LOGE("pthread_create 失败");
+      LOGE("pthread_create失败");
     }
   }
 
   void preServerSpecialize(ServerSpecializeArgs *args) override {
-    (void) args;
+    (void)args;
     api_->setOption(zygisk::Option::DLCLOSE_MODULE_LIBRARY);
   }
 
-private:
+ private:
   Api *api_ = nullptr;
   JNIEnv *env_ = nullptr;
   bool target_ = false;
+  char proc_name_[192] = {0};
 };
 
 REGISTER_ZYGISK_MODULE(HsahcZygiskModule)
