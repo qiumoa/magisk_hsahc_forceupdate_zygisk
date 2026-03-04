@@ -47,7 +47,7 @@ void writeLineFd(int fd, const char *line) {
   }
 }
 
-void appendTimePrefix(char *out, size_t outSize) {
+void makeTimeStr(char *out, size_t outSize) {
   if (out == nullptr || outSize == 0) {
     return;
   }
@@ -61,12 +61,10 @@ void writeFileLog(const char *level, const char *message) {
   if (gLogFd < 0 || level == nullptr || message == nullptr) {
     return;
   }
-
-  char timebuf[32] = {0};
-  appendTimePrefix(timebuf, sizeof(timebuf));
-
+  char t[32] = {0};
+  makeTimeStr(t, sizeof(t));
   char line[2300] = {0};
-  int n = snprintf(line, sizeof(line), "%s [%s] %s\n", timebuf, level, message);
+  int n = snprintf(line, sizeof(line), "%s [%s] %s\n", t, level, message);
   if (n > 0) {
     writeLineFd(gLogFd, line);
   }
@@ -83,15 +81,31 @@ void logPrint(int prio, const char *level, const char *fmt, ...) {
   writeFileLog(level, msg);
 }
 
-#define LOGI(...) logPrint(ANDROID_LOG_INFO, "信息", __VA_ARGS__)
-#define LOGE(...) logPrint(ANDROID_LOG_ERROR, "错误", __VA_ARGS__)
+#define LOGI(...) logPrint(ANDROID_LOG_INFO, "INFO", __VA_ARGS__)
+#define LOGE(...) logPrint(ANDROID_LOG_ERROR, "ERROR", __VA_ARGS__)
 
-bool isTargetProcess(const char *name) {
+bool jstrToBuf(JNIEnv *env, jstring js, char *out, size_t outSize) {
+  if (out == nullptr || outSize == 0) {
+    return false;
+  }
+  out[0] = '\0';
+  if (env == nullptr || js == nullptr) {
+    return false;
+  }
+  const char *s = env->GetStringUTFChars(js, nullptr);
+  if (s == nullptr) {
+    return false;
+  }
+  strncpy(out, s, outSize - 1);
+  out[outSize - 1] = '\0';
+  env->ReleaseStringUTFChars(js, s);
+  return out[0] != '\0';
+}
+
+bool isTargetProcessName(const char *name) {
   if (name == nullptr) {
     return false;
   }
-
-  // 兼容主进程、:子进程、以及少量厂商后缀命名
   size_t n = strlen(kTargetProcess);
   if (strncmp(name, kTargetProcess, n) != 0) {
     return false;
@@ -100,8 +114,15 @@ bool isTargetProcess(const char *name) {
   return tail == '\0' || tail == ':' || tail == '.';
 }
 
-void recordLastProcess(const char *name, bool target) {
-  if (name == nullptr || name[0] == '\0') {
+bool isTargetByDataDir(const char *appDataDir) {
+  if (appDataDir == nullptr || appDataDir[0] == '\0') {
+    return false;
+  }
+  return strstr(appDataDir, kTargetProcess) != nullptr;
+}
+
+void recordLastProcess(jint uid, const char *name, const char *isa, const char *appDataDir, bool target) {
+  if ((name == nullptr || name[0] == '\0') && (appDataDir == nullptr || appDataDir[0] == '\0')) {
     return;
   }
   if (gLastProcFd < 0) {
@@ -112,11 +133,15 @@ void recordLastProcess(const char *name, bool target) {
     return;
   }
 
-  char timebuf[32] = {0};
-  appendTimePrefix(timebuf, sizeof(timebuf));
+  char t[32] = {0};
+  makeTimeStr(t, sizeof(t));
 
-  char line[640] = {0};
-  int n = snprintf(line, sizeof(line), "%s name=%s target=%s\n", timebuf, name, target ? "1" : "0");
+  const char *safeName = (name && name[0]) ? name : "-";
+  const char *safeIsa = (isa && isa[0]) ? isa : "-";
+  const char *safeDir = (appDataDir && appDataDir[0]) ? appDataDir : "-";
+  char line[1200] = {0};
+  int n = snprintf(line, sizeof(line), "%s uid=%d name=%s isa=%s dir=%s target=%s\n", t,
+                   static_cast<int>(uid), safeName, safeIsa, safeDir, target ? "1" : "0");
   if (n > 0) {
     writeLineFd(gLastProcFd, line);
   }
@@ -127,21 +152,21 @@ void ensureLogFileReady() {
     return;
   }
 
-  // 优先使用目标应用私有目录，避免zygote上下文写/data/adb被SELinux拒绝
+  // Prefer app private path first to avoid SELinux restriction when writing /data/adb from app context.
   gLogFd = open(kAppLogPath, O_CREAT | O_WRONLY | O_APPEND | O_CLOEXEC, 0644);
   if (gLogFd >= 0) {
-    LOGI("日志文件已打开: %s", kAppLogPath);
+    LOGI("log opened: %s", kAppLogPath);
     return;
   }
 
   mkdir(kLogDir, 0755);
   gLogFd = open(kAdbLogPath, O_CREAT | O_WRONLY | O_APPEND | O_CLOEXEC, 0644);
   if (gLogFd >= 0) {
-    LOGI("日志文件已打开(回退路径): %s", kAdbLogPath);
+    LOGI("log opened (fallback): %s", kAdbLogPath);
     return;
   }
 
-  __android_log_print(ANDROID_LOG_ERROR, kLogTag, "无法打开日志文件, errno=%d", errno);
+  __android_log_print(ANDROID_LOG_ERROR, kLogTag, "open log failed errno=%d", errno);
 }
 
 using il2cpp_domain_get_t = void *(*)();
@@ -234,7 +259,7 @@ bool patchMethodPointer(const void *methodInfo, void *replace, const char *klass
     return false;
   }
   if (!makeWritable(m)) {
-    LOGE("mprotect失败: %s::%s", klass, method);
+    LOGE("mprotect failed: %s::%s", klass, method);
     return false;
   }
 
@@ -244,7 +269,7 @@ bool patchMethodPointer(const void *methodInfo, void *replace, const char *klass
     m->virtualMethodPointer = replace;
   }
   __builtin___clear_cache(reinterpret_cast<char *>(m), reinterpret_cast<char *>(m) + sizeof(MethodInfoPatch));
-  LOGI("已补丁 %s::%s(%u) 原始=%p 新值=%p", klass, method, paramCount, old, replace);
+  LOGI("patched %s::%s(%u) old=%p new=%p", klass, method, paramCount, old, replace);
   return true;
 }
 
@@ -257,7 +282,7 @@ bool resolveIl2cpp(Il2CppApi &api) {
   auto resolveFn = [&](const char *sym, void **out) -> bool {
     void *p = dlsym(h, sym);
     if (p == nullptr) {
-      LOGE("缺少il2cpp导出符号: %s", sym);
+      LOGE("missing il2cpp export: %s", sym);
       return false;
     }
     memcpy(out, &p, sizeof(p));
@@ -378,14 +403,14 @@ void *workerThread(void *) {
 
     int total = strictPatched + fallbackPatched;
     if (total > 0) {
-      LOGI("il2cpp强更绕过已生效: 总命中=%d (严格=%d, 回退=%d)", total, strictPatched, fallbackPatched);
+      LOGI("il2cpp bypass active: total=%d strict=%d fallback=%d", total, strictPatched, fallbackPatched);
       return nullptr;
     }
 
     sleep(kRetrySleepSec);
   }
 
-  LOGE("超时: 未在窗口内补丁到il2cpp目标方法");
+  LOGE("timeout: failed to patch il2cpp targets");
   return nullptr;
 }
 
@@ -401,16 +426,19 @@ class HsahcZygiskModule : public zygisk::ModuleBase {
   void preAppSpecialize(AppSpecializeArgs *args) override {
     target_ = false;
     proc_name_[0] = '\0';
+    insn_[0] = '\0';
+    app_data_dir_[0] = '\0';
 
-    if (args != nullptr && args->nice_name != nullptr && env_ != nullptr) {
-      const char *name = env_->GetStringUTFChars(args->nice_name, nullptr);
-      if (name != nullptr) {
-        strncpy(proc_name_, name, sizeof(proc_name_) - 1);
-        proc_name_[sizeof(proc_name_) - 1] = '\0';
-        target_ = isTargetProcess(name) || (strstr(name, kTargetProcess) != nullptr);
-        recordLastProcess(name, target_);
-        env_->ReleaseStringUTFChars(args->nice_name, name);
-      }
+    if (args != nullptr && env_ != nullptr) {
+      jstrToBuf(env_, args->nice_name, proc_name_, sizeof(proc_name_));
+      jstrToBuf(env_, args->instruction_set, insn_, sizeof(insn_));
+      jstrToBuf(env_, args->app_data_dir, app_data_dir_, sizeof(app_data_dir_));
+
+      bool byName = isTargetProcessName(proc_name_);
+      bool byDir = isTargetByDataDir(app_data_dir_);
+      target_ = byName || byDir;
+
+      recordLastProcess(args->uid, proc_name_, insn_, app_data_dir_, target_);
     }
 
     if (!target_) {
@@ -418,7 +446,8 @@ class HsahcZygiskModule : public zygisk::ModuleBase {
       return;
     }
 
-    __android_log_print(ANDROID_LOG_INFO, kLogTag, "命中目标进程: %s", proc_name_[0] ? proc_name_ : "<unknown>");
+    __android_log_print(ANDROID_LOG_INFO, kLogTag, "target process matched: name=%s dir=%s",
+                        proc_name_[0] ? proc_name_ : "-", app_data_dir_[0] ? app_data_dir_ : "-");
   }
 
   void postAppSpecialize(const AppSpecializeArgs *args) override {
@@ -428,13 +457,14 @@ class HsahcZygiskModule : public zygisk::ModuleBase {
     }
 
     ensureLogFileReady();
-    LOGI("开始补丁进程: %s", proc_name_[0] ? proc_name_ : "<unknown>");
+    LOGI("start patching: name=%s dir=%s isa=%s", proc_name_[0] ? proc_name_ : "-",
+         app_data_dir_[0] ? app_data_dir_ : "-", insn_[0] ? insn_ : "-");
 
     pthread_t t{};
     if (pthread_create(&t, nullptr, workerThread, nullptr) == 0) {
       pthread_detach(t);
     } else {
-      LOGE("pthread_create失败");
+      LOGE("pthread_create failed");
     }
   }
 
@@ -448,6 +478,8 @@ class HsahcZygiskModule : public zygisk::ModuleBase {
   JNIEnv *env_ = nullptr;
   bool target_ = false;
   char proc_name_[192] = {0};
+  char insn_[64] = {0};
+  char app_data_dir_[320] = {0};
 };
 
 REGISTER_ZYGISK_MODULE(HsahcZygiskModule)
