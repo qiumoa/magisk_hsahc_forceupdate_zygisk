@@ -44,11 +44,26 @@ try {
 $OutRoot = Join-Path $Root $OutDir
 $StageDir = Join-Path $OutRoot "stage"
 $ZygiskDir = Join-Path $StageDir "zygisk"
+$MetaInfSrc = Join-Path $Root "META-INF"
+$MetaInfDst = Join-Path $StageDir "META-INF"
+$CustomizeSrc = Join-Path $Root "customize.sh"
 $LibSrc = Join-Path $Root "module/jni/libs/arm64-v8a/libhsahc_zygisk.so"
 $LibDst = Join-Path $ZygiskDir "arm64-v8a.so"
 
 if (!(Test-Path $LibSrc)) {
   throw "built library not found: $LibSrc"
+}
+if (!(Test-Path $MetaInfSrc)) {
+  throw "META-INF not found: $MetaInfSrc"
+}
+if (!(Test-Path (Join-Path $MetaInfSrc "com/google/android/update-binary"))) {
+  throw "update-binary not found under META-INF/com/google/android"
+}
+if (!(Test-Path (Join-Path $MetaInfSrc "com/google/android/updater-script"))) {
+  throw "updater-script not found under META-INF/com/google/android"
+}
+if (!(Test-Path $CustomizeSrc)) {
+  throw "customize.sh not found: $CustomizeSrc"
 }
 
 if (Test-Path $StageDir) {
@@ -58,6 +73,8 @@ New-Item -ItemType Directory -Path $ZygiskDir -Force | Out-Null
 
 Copy-Item -Force (Join-Path $Root "module.prop") (Join-Path $StageDir "module.prop")
 Copy-Item -Force $LibSrc $LibDst
+Copy-Item -Recurse -Force $MetaInfSrc $MetaInfDst
+Copy-Item -Force $CustomizeSrc (Join-Path $StageDir "customize.sh")
 
 $ZipPath = Join-Path $OutRoot "hsahc_forceupdate_zygisk.zip"
 if (Test-Path $ZipPath) {
@@ -65,9 +82,17 @@ if (Test-Path $ZipPath) {
 }
 New-Item -ItemType Directory -Path $OutRoot -Force | Out-Null
 
+$TarCmd = Get-Command tar -ErrorAction SilentlyContinue
+if (-not $TarCmd) {
+  throw "tar command not found. Please use Windows 10/11 built-in tar or install bsdtar."
+}
+
 Push-Location $StageDir
 try {
-  Compress-Archive -Path * -DestinationPath $ZipPath -Force
+  & tar -a -cf $ZipPath *
+  if ($LASTEXITCODE -ne 0) {
+    throw "tar packaging failed with exit code $LASTEXITCODE"
+  }
 } finally {
   Pop-Location
 }
