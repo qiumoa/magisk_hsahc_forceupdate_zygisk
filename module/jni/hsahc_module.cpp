@@ -2,11 +2,17 @@
 #include <dlfcn.h>
 #include <jni.h>
 #include <pthread.h>
+#include <fcntl.h>
+#include <stdarg.h>
+#include <stdio.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
+#include <errno.h>
 
-#include <cstdint>
-#include <cstring>
+#include <stdint.h>
+#include <string.h>
 
 #include "zygisk.hpp"
 
@@ -19,11 +25,65 @@ namespace {
 constexpr const char *kLogTag = "hsahc-zygisk";
 constexpr const char *kTargetProcess = "com.lta.hsahc.aligames";
 constexpr const char *kIl2cppSo = "libil2cpp.so";
+constexpr const char *kLogDir = "/data/adb/hsahc_forceupdate_zygisk";
+constexpr const char *kLogPath = "/data/adb/hsahc_forceupdate_zygisk/runtime.log";
+constexpr const char *kFallbackLogPath = "/data/user/0/com.lta.hsahc.aligames/files/hsahc_zygisk.log";
 constexpr int kMaxRetry = 180;
 constexpr int kRetrySleepSec = 1;
+int gLogFd = -1;
 
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, kLogTag, __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, kLogTag, __VA_ARGS__)
+void writeFileLog(const char *level, const char *message) {
+  if (gLogFd < 0 || level == nullptr || message == nullptr) {
+    return;
+  }
+
+  char timebuf[32] = {0};
+  time_t now = time(nullptr);
+  struct tm tmv {};
+  localtime_r(&now, &tmv);
+  strftime(timebuf, sizeof(timebuf), "%Y-%m-%d %H:%M:%S", &tmv);
+
+  char line[2300] = {0};
+  int n = snprintf(line, sizeof(line), "%s [%s] %s\n", timebuf, level, message);
+  if (n > 0) {
+    write(gLogFd, line, static_cast<size_t>(n));
+  }
+}
+
+void logPrint(int prio, const char *level, const char *fmt, ...) {
+  char msg[2048] = {0};
+  va_list ap;
+  va_start(ap, fmt);
+  vsnprintf(msg, sizeof(msg), fmt, ap);
+  va_end(ap);
+
+  __android_log_print(prio, kLogTag, "%s", msg);
+  writeFileLog(level, msg);
+}
+
+#define LOGI(...) logPrint(ANDROID_LOG_INFO, "信息", __VA_ARGS__)
+#define LOGE(...) logPrint(ANDROID_LOG_ERROR, "错误", __VA_ARGS__)
+
+void ensureLogFileReady() {
+  if (gLogFd >= 0) {
+    return;
+  }
+
+  mkdir(kLogDir, 0755);
+  gLogFd = open(kLogPath, O_CREAT | O_WRONLY | O_APPEND | O_CLOEXEC, 0644);
+  if (gLogFd >= 0) {
+    LOGI("日志文件已打开: %s", kLogPath);
+    return;
+  }
+
+  gLogFd = open(kFallbackLogPath, O_CREAT | O_WRONLY | O_APPEND | O_CLOEXEC, 0644);
+  if (gLogFd >= 0) {
+    LOGI("日志文件已打开(回退路径): %s", kFallbackLogPath);
+    return;
+  }
+
+  __android_log_print(ANDROID_LOG_ERROR, kLogTag, "无法打开日志文件, errno=%d", errno);
+}
 
 using il2cpp_domain_get_t = void *(*)();
 using il2cpp_thread_attach_t = void *(*)(void *);
@@ -115,7 +175,7 @@ bool patchMethodPointer(const void *methodInfo, void *replace, const char *klass
     return true;
   }
   if (!makeWritable(m)) {
-    LOGE("mprotect failed for %s::%s", klass, method);
+    LOGE("mprotect 失败: %s::%s", klass, method);
     return false;
   }
   void *old = m->methodPointer;
@@ -124,7 +184,7 @@ bool patchMethodPointer(const void *methodInfo, void *replace, const char *klass
     m->virtualMethodPointer = replace;
   }
   __builtin___clear_cache(reinterpret_cast<char *>(m), reinterpret_cast<char *>(m) + sizeof(MethodInfoPatch));
-  LOGI("patched %s::%s(%u) old=%p new=%p", klass, method, paramCount, old, replace);
+  LOGI("已补丁 %s::%s(%u) 原始=%p 新值=%p", klass, method, paramCount, old, replace);
   return true;
 }
 
@@ -137,7 +197,7 @@ bool resolveIl2cpp(Il2CppApi &api) {
   do {                                                               \
     api.name = reinterpret_cast<name##_t>(dlsym(h, sym));           \
     if (api.name == nullptr) {                                       \
-      LOGE("missing il2cpp export: %s", sym);                        \
+      LOGE("缺少 il2cpp 导出符号: %s", sym);                         \
       return false;                                                  \
     }                                                                \
   } while (0)
@@ -162,10 +222,10 @@ bool classMatch(const char *klass, const char *ns, const char *keyword) {
   if (keyword == nullptr || keyword[0] == '\0') {
     return true;
   }
-  if (klass != nullptr && std::strstr(klass, keyword) != nullptr) {
+  if (klass != nullptr && strstr(klass, keyword) != nullptr) {
     return true;
   }
-  if (ns != nullptr && std::strstr(ns, keyword) != nullptr) {
+  if (ns != nullptr && strstr(ns, keyword) != nullptr) {
     return true;
   }
   return false;
@@ -195,7 +255,7 @@ int patchTargets(Il2CppApi &api, bool strictClass) {
       continue;
     }
     const char *imgName = api.image_get_name(image);
-    if (imgName == nullptr || std::strstr(imgName, "Assembly-CSharp") == nullptr) {
+    if (imgName == nullptr || strstr(imgName, "Assembly-CSharp") == nullptr) {
       continue;
     }
 
@@ -221,7 +281,7 @@ int patchTargets(Il2CppApi &api, bool strictClass) {
         uint32_t paramCount = api.method_get_param_count(methodInfo);
 
         for (auto &t : gTargets) {
-          if (std::strcmp(methodName, t.method) != 0) {
+          if (strcmp(methodName, t.method) != 0) {
             continue;
           }
           if (strictClass && !classMatch(klassName, klassNs, t.classKeyword)) {
@@ -258,14 +318,14 @@ void *workerThread(void *) {
 
     int total = strictPatched + fallbackPatched;
     if (total > 0) {
-      LOGI("il2cpp force-update bypass active, patched=%d (strict=%d fallback=%d)", total, strictPatched, fallbackPatched);
+      LOGI("il2cpp 强更绕过已生效, 命中总数=%d (严格匹配=%d, 回退匹配=%d)", total, strictPatched, fallbackPatched);
       return nullptr;
     }
 
     sleep(kRetrySleepSec);
   }
 
-  LOGE("failed to patch il2cpp methods within timeout");
+  LOGE("在超时窗口内未能补丁 il2cpp 目标方法");
   return nullptr;
 }
 
@@ -283,14 +343,15 @@ public:
     if (args != nullptr && args->nice_name != nullptr) {
       const char *name = env_->GetStringUTFChars(args->nice_name, nullptr);
       if (name != nullptr) {
-        target_ = (std::strcmp(name, kTargetProcess) == 0);
+        target_ = (strcmp(name, kTargetProcess) == 0);
         env_->ReleaseStringUTFChars(args->nice_name, name);
       }
     }
     if (!target_) {
       api_->setOption(zygisk::Option::DLCLOSE_MODULE_LIBRARY);
     } else {
-      LOGI("target app matched, preparing il2cpp patch");
+      ensureLogFileReady();
+      LOGI("命中目标进程，开始准备 il2cpp 补丁");
     }
   }
 
@@ -303,7 +364,7 @@ public:
     if (pthread_create(&t, nullptr, workerThread, nullptr) == 0) {
       pthread_detach(t);
     } else {
-      LOGE("pthread_create failed");
+      LOGE("pthread_create 失败");
     }
   }
 

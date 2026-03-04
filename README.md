@@ -1,45 +1,60 @@
-# HSAHC ForceUpdate Bypass (Zygisk)
+# HSAHC 强更绕过模块（Zygisk）
 
-Target package: `com.lta.hsahc.aligames`
+目标包名：`com.lta.hsahc.aligames`
 
-This is a Magisk + Zygisk native module (no Frida, no LSPosed dependency).
-It waits for `libil2cpp.so` and patches force-update decision methods:
+## 方案说明
 
-- `IsVersionLessThanTargetVersion` -> return `false`
-- `VersionCompare` -> return `0`
-- `ConfirmVersionForceUpdateJumpCallback` -> no-op
+这是 `Magisk + Zygisk` 原生模块，不依赖 Frida 和 LSPosed。  
+模块会等待 `libil2cpp.so` 加载后，直接补丁强更判定方法：
 
-It first patches methods in classes containing `GameMgr`.
-If no hit is found, it falls back to a wider name-only match.
+- `IsVersionLessThanTargetVersion` -> 强制返回 `false`
+- `VersionCompare` -> 强制返回 `0`
+- `ConfirmVersionForceUpdateJumpCallback` -> 空实现
 
-## Build on Windows
+优先在类名包含 `GameMgr` 的方法上打补丁；若未命中，会回退到更宽松的匹配。
 
-1. Install Android NDK (r21+, recommended r26+).
-2. Run:
+## 本地构建（Windows）
+
+1. 安装 Android NDK（r21+，建议 r26+）
+2. 执行：
 
 ```bat
 build_zygisk_module.cmd -AndroidNdk "D:/Android/Sdk/ndk/26.3.11579264"
 ```
 
-Output:
+输出文件：
 
 - `out/hsahc_forceupdate_zygisk.zip`
 
-## Install
+## 安装方式
 
-Install the zip in Magisk App, then reboot.
+1. 在 Magisk App 中安装 `out/hsahc_forceupdate_zygisk.zip`
+2. 重启手机
 
-## Logs
+## 日志查看
+
+Logcat 关键字：
 
 ```bash
 adb logcat | grep hsahc-zygisk
 ```
 
-Expected logs:
+手机文件日志（模块会自动写）：
 
-- `target app matched, preparing il2cpp patch`
-- `patched ... IsVersionLessThanTargetVersion`
-- `patched ... VersionCompare`
-- `il2cpp force-update bypass active`
+- `/data/adb/hsahc_forceupdate_zygisk/runtime.log`
+- 回退路径：`/data/user/0/com.lta.hsahc.aligames/files/hsahc_zygisk.log`
 
-If you see `failed to patch il2cpp methods within timeout`, method names/layout changed in this game version and an offset-level hook will be needed.
+查看文件日志：
+
+```bash
+adb shell su -c "tail -n 200 /data/adb/hsahc_forceupdate_zygisk/runtime.log"
+```
+
+## 预期日志
+
+- `命中目标进程，开始准备 il2cpp 补丁`
+- `已补丁 ... IsVersionLessThanTargetVersion`
+- `已补丁 ... VersionCompare`
+- `il2cpp 强更绕过已生效`
+
+若出现 `在超时窗口内未能补丁 il2cpp 目标方法`，说明该版本方法名或结构有变化，需要继续做偏移级 Hook。

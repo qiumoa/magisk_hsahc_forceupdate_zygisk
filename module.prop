@@ -3,4 +3,4 @@ name=HSAHC ForceUpdate Bypass (Zygisk)
 version=v1.0.0
 versionCode=100
 author=qiumoa
-description=Bypass il2cpp force-update decision for com.lta.hsahc.aligames
+description=基于 Zygisk 的 il2cpp 强更绕过模块（com.lta.hsahc.aligames）
