@@ -30,7 +30,8 @@ build_zygisk_module.cmd -AndroidNdk "D:/Android/Sdk/ndk/26.3.11579264"
    - 本地构建：安装 `out/hsahc_forceupdate_zygisk.zip`
    - GitHub：到仓库 `Releases` 页面，下载资产 `hsahc_forceupdate_zygisk.zip` 直接安装
 2. 不要安装 `Source code (zip)`，那不是模块包
-3. 安装完成后重启手机
+3. 确认 Magisk `>= 24.0` 且已开启 `Zygisk`
+4. 安装完成后重启手机
 
 ## 日志查看
 
