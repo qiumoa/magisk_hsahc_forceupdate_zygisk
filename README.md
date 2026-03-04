@@ -1,10 +1,10 @@
-# HSAHC 强制更新绕过模块（Zygisk）
+﻿# HSAHC 强制更新绕过模块（Zygisk）
 
 目标包名：`com.lta.hsahc.aligames`
 
 ## 功能说明
 
-这是一个 `Magisk + Zygisk` 原生模块，不依赖 Frida 或 LSPosed。  
+这是一个 `Magisk + Zygisk` 原生模块，不依赖 Frida 或 LSPosed。
 模块会在目标进程加载 `libil2cpp.so` 后，尝试补丁强更相关方法：
 
 - `IsVersionLessThanTargetVersion` -> 强制返回 `false`
@@ -28,8 +28,9 @@ build_zygisk_module.cmd -AndroidNdk "D:/Android/Sdk/ndk/26.3.11579264"
 
 1. 在 Magisk App 中安装模块 zip：
    - 本地构建：安装 `out/hsahc_forceupdate_zygisk.zip`
-   - GitHub Actions：先下载 artifact 并解压，安装解压后的内层 `hsahc_forceupdate_zygisk.zip`
-2. 重启手机
+   - GitHub：到仓库 `Releases` 页面，下载资产 `hsahc_forceupdate_zygisk.zip` 直接安装
+2. 不要安装 `Source code (zip)`，那不是模块包
+3. 安装完成后重启手机
 
 ## 日志查看
 
