@@ -193,28 +193,30 @@ bool resolveIl2cpp(Il2CppApi &api) {
   if (h == nullptr) {
     return false;
   }
-#define RESOLVE(name, sym)                                           \
-  do {                                                               \
-    api.name = reinterpret_cast<name##_t>(dlsym(h, sym));           \
-    if (api.name == nullptr) {                                       \
-      LOGE("缺少 il2cpp 导出符号: %s", sym);                         \
-      return false;                                                  \
-    }                                                                \
-  } while (0)
 
-  RESOLVE(domain_get, "il2cpp_domain_get");
-  RESOLVE(thread_attach, "il2cpp_thread_attach");
-  RESOLVE(domain_get_assemblies, "il2cpp_domain_get_assemblies");
-  RESOLVE(assembly_get_image, "il2cpp_assembly_get_image");
-  RESOLVE(image_get_name, "il2cpp_image_get_name");
-  RESOLVE(image_get_class_count, "il2cpp_image_get_class_count");
-  RESOLVE(image_get_class, "il2cpp_image_get_class");
-  RESOLVE(class_get_name, "il2cpp_class_get_name");
-  RESOLVE(class_get_namespace, "il2cpp_class_get_namespace");
-  RESOLVE(class_get_methods, "il2cpp_class_get_methods");
-  RESOLVE(method_get_name, "il2cpp_method_get_name");
-  RESOLVE(method_get_param_count, "il2cpp_method_get_param_count");
-#undef RESOLVE
+  auto resolveFn = [&](const char *sym, void **out) -> bool {
+    void *p = dlsym(h, sym);
+    if (p == nullptr) {
+      LOGE("缺少 il2cpp 导出符号: %s", sym);
+      return false;
+    }
+    memcpy(out, &p, sizeof(p));
+    return true;
+  };
+
+  if (!resolveFn("il2cpp_domain_get", reinterpret_cast<void **>(&api.domain_get))) return false;
+  if (!resolveFn("il2cpp_thread_attach", reinterpret_cast<void **>(&api.thread_attach))) return false;
+  if (!resolveFn("il2cpp_domain_get_assemblies", reinterpret_cast<void **>(&api.domain_get_assemblies))) return false;
+  if (!resolveFn("il2cpp_assembly_get_image", reinterpret_cast<void **>(&api.assembly_get_image))) return false;
+  if (!resolveFn("il2cpp_image_get_name", reinterpret_cast<void **>(&api.image_get_name))) return false;
+  if (!resolveFn("il2cpp_image_get_class_count", reinterpret_cast<void **>(&api.image_get_class_count))) return false;
+  if (!resolveFn("il2cpp_image_get_class", reinterpret_cast<void **>(&api.image_get_class))) return false;
+  if (!resolveFn("il2cpp_class_get_name", reinterpret_cast<void **>(&api.class_get_name))) return false;
+  if (!resolveFn("il2cpp_class_get_namespace", reinterpret_cast<void **>(&api.class_get_namespace))) return false;
+  if (!resolveFn("il2cpp_class_get_methods", reinterpret_cast<void **>(&api.class_get_methods))) return false;
+  if (!resolveFn("il2cpp_method_get_name", reinterpret_cast<void **>(&api.method_get_name))) return false;
+  if (!resolveFn("il2cpp_method_get_param_count", reinterpret_cast<void **>(&api.method_get_param_count))) return false;
+
   return true;
 }
 
