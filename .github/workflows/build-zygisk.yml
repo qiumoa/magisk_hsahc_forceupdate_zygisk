@@ -44,6 +44,7 @@ jobs:
           cd module/jni
           "$NDK/ndk-build" NDK_PROJECT_PATH=. APP_BUILD_SCRIPT=Android.mk NDK_APPLICATION_MK=Application.mk -j4
           ls -lah libs/arm64-v8a
+          ls -lah libs/armeabi-v7a
 
       - name: Package magisk module zip
         run: |
@@ -53,6 +54,7 @@ jobs:
           cp customize.sh out/stage/customize.sh
           cp -r META-INF/com out/stage/META-INF/com
           cp module/jni/libs/arm64-v8a/libhsahc_zygisk.so out/stage/zygisk/arm64-v8a.so
+          cp module/jni/libs/armeabi-v7a/libhsahc_zygisk.so out/stage/zygisk/armeabi-v7a.so
           test -f out/stage/META-INF/com/google/android/update-binary
           test -f out/stage/META-INF/com/google/android/updater-script
           cd out/stage
@@ -62,6 +64,7 @@ jobs:
           unzip -l hsahc_forceupdate_zygisk.zip | grep -q "META-INF/com/google/android/update-binary"
           unzip -l hsahc_forceupdate_zygisk.zip | grep -q "META-INF/com/google/android/updater-script"
           unzip -l hsahc_forceupdate_zygisk.zip | grep -q "zygisk/arm64-v8a.so"
+          unzip -l hsahc_forceupdate_zygisk.zip | grep -q "zygisk/armeabi-v7a.so"
           ls -lah
           sha256sum hsahc_forceupdate_zygisk.zip > SHA256SUMS.txt
           cat SHA256SUMS.txt

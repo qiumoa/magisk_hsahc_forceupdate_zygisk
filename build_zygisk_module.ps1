@@ -47,12 +47,8 @@ $ZygiskDir = Join-Path $StageDir "zygisk"
 $MetaInfSrc = Join-Path $Root "META-INF"
 $MetaInfDst = Join-Path $StageDir "META-INF"
 $CustomizeSrc = Join-Path $Root "customize.sh"
-$LibSrc = Join-Path $Root "module/jni/libs/arm64-v8a/libhsahc_zygisk.so"
-$LibDst = Join-Path $ZygiskDir "arm64-v8a.so"
+$AbiList = @("arm64-v8a", "armeabi-v7a")
 
-if (!(Test-Path $LibSrc)) {
-  throw "built library not found: $LibSrc"
-}
 if (!(Test-Path $MetaInfSrc)) {
   throw "META-INF not found: $MetaInfSrc"
 }
@@ -72,7 +68,14 @@ if (Test-Path $StageDir) {
 New-Item -ItemType Directory -Path $ZygiskDir -Force | Out-Null
 
 Copy-Item -Force (Join-Path $Root "module.prop") (Join-Path $StageDir "module.prop")
-Copy-Item -Force $LibSrc $LibDst
+foreach ($abi in $AbiList) {
+  $src = Join-Path $Root "module/jni/libs/$abi/libhsahc_zygisk.so"
+  $dst = Join-Path $ZygiskDir "$abi.so"
+  if (!(Test-Path $src)) {
+    throw "built library not found for abi '$abi': $src"
+  }
+  Copy-Item -Force $src $dst
+}
 Copy-Item -Recurse -Force $MetaInfSrc $MetaInfDst
 Copy-Item -Force $CustomizeSrc (Join-Path $StageDir "customize.sh")
 

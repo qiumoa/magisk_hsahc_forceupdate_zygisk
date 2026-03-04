@@ -11,6 +11,8 @@
 - `VersionCompare` -> 强制返回 `0`
 - `ConfirmVersionForceUpdateJumpCallback` -> 空实现（no-op）
 
+已内置双 ABI：`arm64-v8a` 与 `armeabi-v7a`。
+
 ## 本地构建（Windows）
 
 1. 安装 Android NDK（建议 r26+）
