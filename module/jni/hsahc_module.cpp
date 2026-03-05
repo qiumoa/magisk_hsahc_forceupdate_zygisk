@@ -259,6 +259,7 @@ enum ReplaceAction : int {
   kReturnFalse = 0,
   kReturnZero = 1,
   kReturnVoid = 2,
+  kReturnTrue = 3,
 };
 
 struct TargetSpec {
@@ -269,21 +270,28 @@ struct TargetSpec {
 };
 
 extern "C" bool ret_false_stub(...) { return false; }
+extern "C" bool ret_true_stub(...) { return true; }
 extern "C" int ret_zero_stub(...) { return 0; }
 extern "C" void ret_void_stub(...) {}
 
 TargetSpec gTargets[] = {
+    {"get_IsGameControlPassed", "GameMgr", kReturnTrue, 0},
+    {"IsGameControlPassed", "GameMgr", kReturnTrue, 0},
     {"IsVersionLessThanTargetVersion", "GameMgr", kReturnFalse, 0},
     {"VersionCompare", "GameMgr", kReturnZero, 0},
     {"ConfirmVersionForceUpdateJumpCallback", "GameMgr", kReturnVoid, 0},
-    {"VersionForceUpdateJump", "GameMgr", kReturnVoid, 0},
-    {"versionForceUpdateJump", "GameMgr", kReturnVoid, 0},
+    {"VersionForceUpdateJump", "", kReturnVoid, 0},
+    {"versionForceUpdateJump", "", kReturnVoid, 0},
+    {"OpenNativeBrowser", "LTUnityCallNative", kReturnVoid, 0},
+    {"ShowNativeQuitDialog", "LTUnityCallNative", kReturnVoid, 0},
 };
 
 void *resolveActionPtr(int action) {
   switch (action) {
     case kReturnFalse:
       return reinterpret_cast<void *>(ret_false_stub);
+    case kReturnTrue:
+      return reinterpret_cast<void *>(ret_true_stub);
     case kReturnZero:
       return reinterpret_cast<void *>(ret_zero_stub);
     case kReturnVoid:
@@ -567,7 +575,7 @@ bool classMatch(const char *klass, const char *nameSpace, const char *keyword) {
   return false;
 }
 
-int patchTargets(Il2CppApi &api, bool strictClass) {
+int patchTargets(Il2CppApi &api) {
   void *domain = api.domain_get();
   if (domain == nullptr) {
     return 0;
@@ -620,7 +628,7 @@ int patchTargets(Il2CppApi &api, bool strictClass) {
           if (strcmp(methodName, t.method) != 0) {
             continue;
           }
-          if (strictClass && !classMatch(klassName, klassNs, t.classKeyword)) {
+          if (!classMatch(klassName, klassNs, t.classKeyword)) {
             continue;
           }
           void *replace = resolveActionPtr(t.action);
@@ -637,6 +645,7 @@ int patchTargets(Il2CppApi &api, bool strictClass) {
 
 void *workerThread(void *) {
   time_t startedAt = time(nullptr);
+  bool loggedTargets = false;
   for (int i = 0; i < kMaxRetry; i++) {
     Il2CppApi api {};
     if (!resolveIl2cpp(api)) {
@@ -658,24 +667,38 @@ void *workerThread(void *) {
       continue;
     }
 
-    int strictPatched = patchTargets(api, true);
-    int fallbackPatched = 0;
-    if (strictPatched == 0) {
-      fallbackPatched = patchTargets(api, false);
+    int patchedNow = patchTargets(api);
+    if (!loggedTargets || patchedNow > 0 || (i % 10) == 0) {
+      int totalHit = 0;
+      for (auto &t : gTargets) {
+        totalHit += t.hitCount;
+      }
+      LOGI("补丁状态: 循环=%d 本轮新增=%d 累计命中=%d", i, patchedNow, totalHit);
+      for (auto &t : gTargets) {
+        LOGI("目标命中: 类=%s 方法=%s 次数=%d", t.classKeyword[0] ? t.classKeyword : "*", t.method,
+             t.hitCount);
+      }
+      loggedTargets = true;
     }
 
-    int total = strictPatched + fallbackPatched;
-    if (total > 0) {
-      LOGI("il2cpp bypass active: total=%d strict=%d fallback=%d", total, strictPatched, fallbackPatched);
-      for (auto &t : gTargets) {
-        LOGI("target hit: %s count=%d", t.method, t.hitCount);
+    bool ready = true;
+    for (auto &t : gTargets) {
+      if (t.hitCount <= 0) {
+        ready = false;
+        break;
       }
+    }
+    if (ready) {
+      LOGI("il2cpp绕过已生效: 所有目标都已完成补丁");
       return nullptr;
     }
     sleep(kRetrySleepSec);
   }
 
-  LOGE("timeout: failed to patch il2cpp targets");
+  LOGE("超时: 仍有目标未完成补丁");
+  for (auto &t : gTargets) {
+    LOGE("目标缺失: 类=%s 方法=%s 次数=%d", t.classKeyword[0] ? t.classKeyword : "*", t.method, t.hitCount);
+  }
   return nullptr;
 }
 
