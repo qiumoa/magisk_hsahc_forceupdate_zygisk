@@ -370,6 +370,8 @@ bool resolveIl2cpp(Il2CppApi &api) {
   void *hShortLoad = nullptr;
   if (findLoadedSoPath(kIl2cppSo, realPath, sizeof(realPath))) {
     LOGI("found il2cpp in maps: %s", realPath);
+    int ok = access(realPath, R_OK);
+    LOGI("il2cpp path access=%d errno=%d", ok, ok == 0 ? 0 : errno);
     hRealNoLoad = dlopen(realPath, RTLD_NOW | RTLD_NOLOAD);
     hRealLoad = dlopen(realPath, RTLD_NOW);
   }
@@ -414,10 +416,12 @@ bool resolveIl2cpp(Il2CppApi &api) {
     return false;
   };
 
-  if (hRealNoLoad == nullptr && hRealLoad == nullptr && hShortNoLoad == nullptr && hShortLoad == nullptr) {
+  bool allHandleNull = (hRealNoLoad == nullptr && hRealLoad == nullptr && hShortNoLoad == nullptr &&
+                        hShortLoad == nullptr);
+  if (allHandleNull) {
     const char *err = dlerror();
-    LOGE("dlopen il2cpp failed: %s", err ? err : "<no dlerror>");
-    return false;
+    LOGE("dlopen il2cpp handles all null: %s", err ? err : "<no dlerror>");
+    // Do not return here. RTLD_DEFAULT may still resolve symbols in current linker namespace.
   }
 
   if (!resolveFn("il2cpp_domain_get", reinterpret_cast<void **>(&api.domain_get))) return false;
