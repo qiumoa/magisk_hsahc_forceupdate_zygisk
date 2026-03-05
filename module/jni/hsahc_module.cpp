@@ -277,6 +277,11 @@ extern "C" void ret_void_stub(...) {}
 TargetSpec gTargets[] = {
     {"get_IsGameControlPassed", "GameMgr", kReturnTrue, 0},
     {"IsGameControlPassed", "GameMgr", kReturnTrue, 0},
+    {"set_IsGameControlPassed", "GameMgr", kReturnVoid, 0},
+    {"RequestGameControl", "GameMgr", kReturnVoid, 0},
+    {"RequestGameControlCallback", "GameMgr", kReturnVoid, 0},
+    {"RequestVersionControl", "", kReturnVoid, 0},
+    {"CancelReqeustGameControl", "GameMgr", kReturnVoid, 0},
     {"IsVersionLessThanTargetVersion", "GameMgr", kReturnFalse, 0},
     {"VersionCompare", "GameMgr", kReturnZero, 0},
     {"ConfirmVersionForceUpdateJumpCallback", "GameMgr", kReturnVoid, 0},
@@ -575,6 +580,109 @@ bool classMatch(const char *klass, const char *nameSpace, const char *keyword) {
   return false;
 }
 
+bool classNameContains(const char *klass, const char *nameSpace, const char *keyword) {
+  if (keyword == nullptr || keyword[0] == '\0') {
+    return false;
+  }
+  if (klass != nullptr && strstr(klass, keyword) != nullptr) {
+    return true;
+  }
+  if (nameSpace != nullptr && strstr(nameSpace, keyword) != nullptr) {
+    return true;
+  }
+  return false;
+}
+
+bool methodNameContainsAny(const char *methodName, const char *const *keys, int n) {
+  if (methodName == nullptr || keys == nullptr || n <= 0) {
+    return false;
+  }
+  for (int i = 0; i < n; i++) {
+    if (keys[i] != nullptr && keys[i][0] != '\0' && strstr(methodName, keys[i]) != nullptr) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void logCandidateMethods(Il2CppApi &api) {
+  static bool dumped = false;
+  if (dumped) {
+    return;
+  }
+
+  void *domain = api.domain_get();
+  if (domain == nullptr) {
+    return;
+  }
+  api.thread_attach(domain);
+
+  size_t asmCount = 0;
+  const void **assemblies = api.domain_get_assemblies(domain, &asmCount);
+  if (assemblies == nullptr || asmCount == 0) {
+    return;
+  }
+
+  const char *classKeys[] = {"GameMgr", "LTUnityCallNative", "UpdateVersionUI"};
+  const char *methodKeys[] = {"Version", "Update", "Force", "GameControl", "version", "update", "force"};
+  int printed = 0;
+  for (size_t i = 0; i < asmCount; i++) {
+    const void *assembly = assemblies[i];
+    if (assembly == nullptr) {
+      continue;
+    }
+    void *image = api.assembly_get_image(assembly);
+    if (image == nullptr) {
+      continue;
+    }
+    const char *imgName = api.image_get_name(image);
+    if (imgName == nullptr || strstr(imgName, "Assembly-CSharp") == nullptr) {
+      continue;
+    }
+
+    size_t classCount = api.image_get_class_count(image);
+    for (size_t c = 0; c < classCount; c++) {
+      void *klass = api.image_get_class(image, c);
+      if (klass == nullptr) {
+        continue;
+      }
+      const char *klassName = api.class_get_name(klass);
+      const char *klassNs = api.class_get_namespace(klass);
+      bool classOk = false;
+      for (int k = 0; k < 3; k++) {
+        if (classNameContains(klassName, klassNs, classKeys[k])) {
+          classOk = true;
+          break;
+        }
+      }
+      if (!classOk) {
+        continue;
+      }
+
+      void *iter = nullptr;
+      while (true) {
+        const void *methodInfo = api.class_get_methods(klass, &iter);
+        if (methodInfo == nullptr) {
+          break;
+        }
+        const char *methodName = api.method_get_name(methodInfo);
+        if (!methodNameContainsAny(methodName, methodKeys, 7)) {
+          continue;
+        }
+        uint32_t paramCount = api.method_get_param_count(methodInfo);
+        LOGI("候选方法: %s::%s(%u)", klassName ? klassName : "<null>", methodName ? methodName : "<null>", paramCount);
+        printed++;
+        if (printed >= 120) {
+          LOGI("候选方法日志已截断，避免刷屏");
+          dumped = true;
+          return;
+        }
+      }
+    }
+  }
+  dumped = true;
+}
+
 int patchTargets(Il2CppApi &api) {
   void *domain = api.domain_get();
   if (domain == nullptr) {
@@ -655,6 +763,8 @@ void *workerThread(void *) {
       sleep(kRetrySleepSec);
       continue;
     }
+
+    logCandidateMethods(api);
 
     // Delay a bit after il2cpp appears to avoid crashing on early domain access.
     time_t now = time(nullptr);
