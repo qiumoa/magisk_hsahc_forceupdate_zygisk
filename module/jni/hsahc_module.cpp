@@ -364,33 +364,61 @@ bool patchMethodPointer(const void *methodInfo, int action, void *replace, const
 
 bool resolveIl2cpp(Il2CppApi &api) {
   char realPath[512] = {0};
-  void *h = nullptr;
+  void *hRealNoLoad = nullptr;
+  void *hRealLoad = nullptr;
+  void *hShortNoLoad = nullptr;
+  void *hShortLoad = nullptr;
   if (findLoadedSoPath(kIl2cppSo, realPath, sizeof(realPath))) {
     LOGI("found il2cpp in maps: %s", realPath);
-    h = dlopen(realPath, RTLD_NOW | RTLD_NOLOAD);
-    if (h == nullptr) {
-      h = dlopen(realPath, RTLD_NOW);
-    }
+    hRealNoLoad = dlopen(realPath, RTLD_NOW | RTLD_NOLOAD);
+    hRealLoad = dlopen(realPath, RTLD_NOW);
   }
-  if (h == nullptr) {
-    h = dlopen(kIl2cppSo, RTLD_NOW | RTLD_NOLOAD);
-  }
-  if (h == nullptr) {
-    h = dlopen(kIl2cppSo, RTLD_NOW);
-  }
-  if (h == nullptr) {
-    return false;
-  }
+  hShortNoLoad = dlopen(kIl2cppSo, RTLD_NOW | RTLD_NOLOAD);
+  hShortLoad = dlopen(kIl2cppSo, RTLD_NOW);
 
   auto resolveFn = [&](const char *sym, void **out) -> bool {
-    void *p = dlsym(h, sym);
-    if (p == nullptr) {
-      LOGE("missing il2cpp export: %s", sym);
-      return false;
+    void *p = dlsym(RTLD_DEFAULT, sym);
+    if (p != nullptr) {
+      memcpy(out, &p, sizeof(p));
+      return true;
     }
-    memcpy(out, &p, sizeof(p));
-    return true;
+    if (hRealNoLoad != nullptr) {
+      p = dlsym(hRealNoLoad, sym);
+      if (p != nullptr) {
+        memcpy(out, &p, sizeof(p));
+        return true;
+      }
+    }
+    if (hRealLoad != nullptr) {
+      p = dlsym(hRealLoad, sym);
+      if (p != nullptr) {
+        memcpy(out, &p, sizeof(p));
+        return true;
+      }
+    }
+    if (hShortNoLoad != nullptr) {
+      p = dlsym(hShortNoLoad, sym);
+      if (p != nullptr) {
+        memcpy(out, &p, sizeof(p));
+        return true;
+      }
+    }
+    if (hShortLoad != nullptr) {
+      p = dlsym(hShortLoad, sym);
+      if (p != nullptr) {
+        memcpy(out, &p, sizeof(p));
+        return true;
+      }
+    }
+    LOGE("missing il2cpp export: %s", sym);
+    return false;
   };
+
+  if (hRealNoLoad == nullptr && hRealLoad == nullptr && hShortNoLoad == nullptr && hShortLoad == nullptr) {
+    const char *err = dlerror();
+    LOGE("dlopen il2cpp failed: %s", err ? err : "<no dlerror>");
+    return false;
+  }
 
   if (!resolveFn("il2cpp_domain_get", reinterpret_cast<void **>(&api.domain_get))) return false;
   if (!resolveFn("il2cpp_thread_attach", reinterpret_cast<void **>(&api.thread_attach))) return false;
