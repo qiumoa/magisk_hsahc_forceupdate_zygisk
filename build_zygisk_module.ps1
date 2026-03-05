@@ -47,6 +47,7 @@ $ZygiskDir = Join-Path $StageDir "zygisk"
 $MetaInfSrc = Join-Path $Root "META-INF"
 $MetaInfDst = Join-Path $StageDir "META-INF"
 $CustomizeSrc = Join-Path $Root "customize.sh"
+$ConfigSrc = Join-Path $Root "config.prop"
 $AbiList = @("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
 
 if (!(Test-Path $MetaInfSrc)) {
@@ -60,6 +61,9 @@ if (!(Test-Path (Join-Path $MetaInfSrc "com/google/android/updater-script"))) {
 }
 if (!(Test-Path $CustomizeSrc)) {
   throw "customize.sh not found: $CustomizeSrc"
+}
+if (!(Test-Path $ConfigSrc)) {
+  throw "config.prop not found: $ConfigSrc"
 }
 
 if (Test-Path $StageDir) {
@@ -78,6 +82,7 @@ foreach ($abi in $AbiList) {
 }
 Copy-Item -Recurse -Force $MetaInfSrc $MetaInfDst
 Copy-Item -Force $CustomizeSrc (Join-Path $StageDir "customize.sh")
+Copy-Item -Force $ConfigSrc (Join-Path $StageDir "config.prop")
 
 $ZipPath = Join-Path $OutRoot "hsahc_forceupdate_zygisk.zip"
 if (Test-Path $ZipPath) {

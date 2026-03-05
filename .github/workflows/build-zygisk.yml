@@ -12,6 +12,7 @@ on:
       - "module/**"
       - "META-INF/**"
       - "customize.sh"
+      - "config.prop"
       - ".github/workflows/build-zygisk.yml"
       - "module.prop"
       - "build_zygisk_module.ps1"
@@ -54,6 +55,7 @@ jobs:
           mkdir -p out/stage/META-INF
           cp module.prop out/stage/module.prop
           cp customize.sh out/stage/customize.sh
+          cp config.prop out/stage/config.prop
           cp -r META-INF/com out/stage/META-INF/com
           cp module/jni/libs/arm64-v8a/libhsahc_zygisk.so out/stage/zygisk/arm64-v8a.so
           cp module/jni/libs/armeabi-v7a/libhsahc_zygisk.so out/stage/zygisk/armeabi-v7a.so
@@ -65,6 +67,7 @@ jobs:
           zip -r -9 ../hsahc_forceupdate_zygisk.zip ./*
           cd ..
           unzip -l hsahc_forceupdate_zygisk.zip | grep -q "module.prop"
+          unzip -l hsahc_forceupdate_zygisk.zip | grep -q "config.prop"
           unzip -l hsahc_forceupdate_zygisk.zip | grep -q "META-INF/com/google/android/update-binary"
           unzip -l hsahc_forceupdate_zygisk.zip | grep -q "META-INF/com/google/android/updater-script"
           unzip -l hsahc_forceupdate_zygisk.zip | grep -q "zygisk/arm64-v8a.so"

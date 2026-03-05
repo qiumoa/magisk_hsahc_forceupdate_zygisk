@@ -12,6 +12,7 @@
 - `ConfirmVersionForceUpdateJumpCallback` -> 空实现（no-op）
 - `VersionForceUpdateJump` -> 空实现（no-op）
 - 当前代码已精简为单一路径：`ELF 符号解析 -> 方法指针补丁`（含短暂稳定等待，避免早期闪退）
+- 补丁延迟支持配置：`patch_delay_sec`（0-60）
 
 已内置四 ABI：`arm64-v8a`、`armeabi-v7a`、`x86_64`、`x86`。
 
@@ -36,6 +37,18 @@ build_zygisk_module.cmd -AndroidNdk "D:/Android/Sdk/ndk/26.3.11579264"
 2. 不要安装 `Source code (zip)`，那不是模块包
 3. 确认 Magisk `>= 26.0` 且已开启 `Zygisk`
 4. 安装完成后重启手机
+
+## 延迟配置
+
+编辑模块目录中的配置文件：
+
+- `/data/adb/modules/hsahc_forceupdate_zygisk/config.prop`
+
+示例：
+
+```properties
+patch_delay_sec=3
+```
 
 ## 日志查看
 

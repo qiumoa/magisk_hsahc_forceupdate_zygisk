@@ -32,12 +32,18 @@ constexpr const char *kLogDir = "/data/adb/hsahc_forceupdate_zygisk";
 constexpr const char *kAdbLogPath = "/data/adb/hsahc_forceupdate_zygisk/runtime.log";
 constexpr const char *kAppLogPath = "/data/user/0/com.lta.hsahc.aligames/files/hsahc_zygisk.log";
 constexpr const char *kLastProcPath = "/data/adb/hsahc_forceupdate_zygisk/last_process.log";
+constexpr const char *kCfgPathModule = "/data/adb/modules/hsahc_forceupdate_zygisk/config.prop";
+constexpr const char *kCfgPathData = "/data/adb/hsahc_forceupdate_zygisk/config.prop";
 
 constexpr int kMaxRetry = 180;
 constexpr int kRetrySleepSec = 1;
+constexpr int kDefaultPatchDelaySec = 10;
+constexpr int kMinPatchDelaySec = 0;
+constexpr int kMaxPatchDelaySec = 60;
 
 int gLogFd = -1;
 int gLastProcFd = -1;
+int gPatchDelaySec = kDefaultPatchDelaySec;
 
 void writeLineFd(int fd, const char *line) {
   if (fd < 0 || line == nullptr) {
@@ -153,6 +159,68 @@ void ensureLogFileReady() {
     return;
   }
   __android_log_print(ANDROID_LOG_ERROR, kLogTag, "open log failed errno=%d", errno);
+}
+
+int clampInt(int v, int lo, int hi) {
+  if (v < lo) {
+    return lo;
+  }
+  if (v > hi) {
+    return hi;
+  }
+  return v;
+}
+
+bool parseDelayConfigLine(const char *line, int *outValue) {
+  if (line == nullptr || outValue == nullptr) {
+    return false;
+  }
+  while (*line == ' ' || *line == '\t') {
+    ++line;
+  }
+  if (strncmp(line, "patch_delay_sec", 15) != 0) {
+    return false;
+  }
+  const char *eq = strchr(line, '=');
+  if (eq == nullptr) {
+    return false;
+  }
+  ++eq;
+  while (*eq == ' ' || *eq == '\t') {
+    ++eq;
+  }
+  if (*eq < '0' || *eq > '9') {
+    return false;
+  }
+  *outValue = atoi(eq);
+  return true;
+}
+
+int loadPatchDelayConfig() {
+  const char *paths[] = {kCfgPathModule, kCfgPathData};
+  for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
+    FILE *fp = fopen(paths[i], "r");
+    if (fp == nullptr) {
+      continue;
+    }
+    char line[256] = {0};
+    int value = kDefaultPatchDelaySec;
+    bool found = false;
+    while (fgets(line, sizeof(line), fp) != nullptr) {
+      if (parseDelayConfigLine(line, &value)) {
+        found = true;
+        break;
+      }
+    }
+    fclose(fp);
+    if (found) {
+      int c = clampInt(value, kMinPatchDelaySec, kMaxPatchDelaySec);
+      __android_log_print(ANDROID_LOG_INFO, kLogTag, "load config: %s patch_delay_sec=%d", paths[i], c);
+      return c;
+    }
+  }
+  __android_log_print(ANDROID_LOG_INFO, kLogTag, "use default patch_delay_sec=%d", kDefaultPatchDelaySec);
+  return kDefaultPatchDelaySec;
 }
 
 using il2cpp_domain_get_t = void *(*)();
@@ -580,9 +648,10 @@ void *workerThread(void *) {
 
     // Delay a bit after il2cpp appears to avoid crashing on early domain access.
     time_t now = time(nullptr);
-    if ((now - startedAt) < 10) {
+    if ((now - startedAt) < gPatchDelaySec) {
       if ((i % 5) == 0) {
-        LOGI("il2cpp ready, wait VM stabilize... elapsed=%llds", static_cast<long long>(now - startedAt));
+        LOGI("il2cpp ready, wait VM stabilize... elapsed=%llds/%ds", static_cast<long long>(now - startedAt),
+             gPatchDelaySec);
       }
       sleep(kRetrySleepSec);
       continue;
@@ -630,6 +699,9 @@ class HsahcZygiskModule : public zygisk::ModuleBase {
       bool byDir = isTargetByDataDir(app_data_dir_);
       target_ = byName || byDir;
       recordLastProcess(args->uid, proc_name_, insn_, app_data_dir_, target_);
+      if (target_) {
+        gPatchDelaySec = loadPatchDelayConfig();
+      }
     }
 
     if (!target_) {
@@ -643,8 +715,8 @@ class HsahcZygiskModule : public zygisk::ModuleBase {
       return;
     }
     ensureLogFileReady();
-    LOGI("start patching: name=%s dir=%s isa=%s", proc_name_[0] ? proc_name_ : "-", app_data_dir_[0] ? app_data_dir_ : "-",
-         insn_[0] ? insn_ : "-");
+    LOGI("start patching: name=%s dir=%s isa=%s delay=%ds", proc_name_[0] ? proc_name_ : "-",
+         app_data_dir_[0] ? app_data_dir_ : "-", insn_[0] ? insn_ : "-", gPatchDelaySec);
 
     pthread_t t {};
     if (pthread_create(&t, nullptr, workerThread, nullptr) == 0) {
