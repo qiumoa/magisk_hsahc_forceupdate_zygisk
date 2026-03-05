@@ -3,13 +3,13 @@
 #include <jni.h>
 #include <pthread.h>
 
-#include <errno.h>
 #include <elf.h>
+#include <errno.h>
 #include <fcntl.h>
-#include <stdlib.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -65,7 +65,7 @@ void writeFileLog(const char *level, const char *message) {
   }
   char t[32] = {0};
   makeTimeStr(t, sizeof(t));
-  char line[2300] = {0};
+  char line[2048] = {0};
   int n = snprintf(line, sizeof(line), "%s [%s] %s\n", t, level, message);
   if (n > 0) {
     writeLineFd(gLogFd, line);
@@ -73,12 +73,11 @@ void writeFileLog(const char *level, const char *message) {
 }
 
 void logPrint(int prio, const char *level, const char *fmt, ...) {
-  char msg[2048] = {0};
+  char msg[1600] = {0};
   va_list ap;
   va_start(ap, fmt);
   vsnprintf(msg, sizeof(msg), fmt, ap);
   va_end(ap);
-
   __android_log_print(prio, kLogTag, "%s", msg);
   writeFileLog(level, msg);
 }
@@ -87,13 +86,10 @@ void logPrint(int prio, const char *level, const char *fmt, ...) {
 #define LOGE(...) logPrint(ANDROID_LOG_ERROR, "ERROR", __VA_ARGS__)
 
 bool jstrToBuf(JNIEnv *env, jstring js, char *out, size_t outSize) {
-  if (out == nullptr || outSize == 0) {
+  if (env == nullptr || js == nullptr || out == nullptr || outSize == 0) {
     return false;
   }
   out[0] = '\0';
-  if (env == nullptr || js == nullptr) {
-    return false;
-  }
   const char *s = env->GetStringUTFChars(js, nullptr);
   if (s == nullptr) {
     return false;
@@ -117,16 +113,10 @@ bool isTargetProcessName(const char *name) {
 }
 
 bool isTargetByDataDir(const char *appDataDir) {
-  if (appDataDir == nullptr || appDataDir[0] == '\0') {
-    return false;
-  }
-  return strstr(appDataDir, kTargetProcess) != nullptr;
+  return appDataDir != nullptr && strstr(appDataDir, kTargetProcess) != nullptr;
 }
 
 void recordLastProcess(jint uid, const char *name, const char *isa, const char *appDataDir, bool target) {
-  if ((name == nullptr || name[0] == '\0') && (appDataDir == nullptr || appDataDir[0] == '\0')) {
-    return;
-  }
   if (gLastProcFd < 0) {
     mkdir(kLogDir, 0755);
     gLastProcFd = open(kLastProcPath, O_CREAT | O_WRONLY | O_APPEND | O_CLOEXEC, 0644);
@@ -134,17 +124,15 @@ void recordLastProcess(jint uid, const char *name, const char *isa, const char *
   if (gLastProcFd < 0) {
     return;
   }
-
   char t[32] = {0};
   makeTimeStr(t, sizeof(t));
-
-  const char *safeName = (name && name[0]) ? name : "-";
-  const char *safeIsa = (isa && isa[0]) ? isa : "-";
-  const char *safeDir = (appDataDir && appDataDir[0]) ? appDataDir : "-";
-  char line[1200] = {0};
-  int n = snprintf(line, sizeof(line), "%s uid=%d name=%s isa=%s dir=%s target=%s\n", t,
-                   static_cast<int>(uid), safeName, safeIsa, safeDir, target ? "1" : "0");
-  if (n > 0) {
+  const char *n = (name && name[0]) ? name : "-";
+  const char *i = (isa && isa[0]) ? isa : "-";
+  const char *d = (appDataDir && appDataDir[0]) ? appDataDir : "-";
+  char line[1024] = {0};
+  int c = snprintf(line, sizeof(line), "%s uid=%d name=%s isa=%s dir=%s target=%s\n", t, static_cast<int>(uid), n,
+                   i, d, target ? "1" : "0");
+  if (c > 0) {
     writeLineFd(gLastProcFd, line);
   }
 }
@@ -153,21 +141,17 @@ void ensureLogFileReady() {
   if (gLogFd >= 0) {
     return;
   }
-
-  // Prefer app private path first to avoid SELinux restriction when writing /data/adb from app context.
   gLogFd = open(kAppLogPath, O_CREAT | O_WRONLY | O_APPEND | O_CLOEXEC, 0644);
   if (gLogFd >= 0) {
     LOGI("log opened: %s", kAppLogPath);
     return;
   }
-
   mkdir(kLogDir, 0755);
   gLogFd = open(kAdbLogPath, O_CREAT | O_WRONLY | O_APPEND | O_CLOEXEC, 0644);
   if (gLogFd >= 0) {
-    LOGI("log opened (fallback): %s", kAdbLogPath);
+    LOGI("log opened(fallback): %s", kAdbLogPath);
     return;
   }
-
   __android_log_print(ANDROID_LOG_ERROR, kLogTag, "open log failed errno=%d", errno);
 }
 
@@ -335,7 +319,6 @@ bool resolveElfSymOffset64(const char *path, const char *symName, uintptr_t *sym
   if (path == nullptr || symName == nullptr || symOffsetOut == nullptr) {
     return false;
   }
-
   int fd = open(path, O_RDONLY | O_CLOEXEC);
   if (fd < 0) {
     return false;
@@ -346,8 +329,8 @@ bool resolveElfSymOffset64(const char *path, const char *symName, uintptr_t *sym
     close(fd);
     return false;
   }
-  if (memcmp(eh.e_ident, ELFMAG, SELFMAG) != 0 || eh.e_ident[EI_CLASS] != ELFCLASS64 ||
-      eh.e_shoff == 0 || eh.e_shentsize != sizeof(Elf64_Shdr) || eh.e_shnum == 0) {
+  if (memcmp(eh.e_ident, ELFMAG, SELFMAG) != 0 || eh.e_ident[EI_CLASS] != ELFCLASS64 || eh.e_shoff == 0 ||
+      eh.e_shentsize != sizeof(Elf64_Shdr) || eh.e_shnum == 0) {
     close(fd);
     return false;
   }
@@ -365,7 +348,7 @@ bool resolveElfSymOffset64(const char *path, const char *symName, uintptr_t *sym
   }
 
   bool found = false;
-  uintptr_t off = 0;
+  uintptr_t offset = 0;
   for (uint16_t i = 0; i < eh.e_shnum && !found; ++i) {
     Elf64_Shdr &symSec = shdrs[i];
     if (!(symSec.sh_type == SHT_DYNSYM || symSec.sh_type == SHT_SYMTAB) || symSec.sh_entsize != sizeof(Elf64_Sym)) {
@@ -378,7 +361,6 @@ bool resolveElfSymOffset64(const char *path, const char *symName, uintptr_t *sym
     if (strSec.sh_size == 0) {
       continue;
     }
-
     auto *strtab = reinterpret_cast<char *>(malloc(static_cast<size_t>(strSec.sh_size)));
     if (strtab == nullptr) {
       continue;
@@ -402,204 +384,104 @@ bool resolveElfSymOffset64(const char *path, const char *symName, uintptr_t *sym
       if (name == nullptr || *name == '\0') {
         continue;
       }
-      if (strcmp(name, symName) != 0) {
+      if (strcmp(name, symName) != 0 || sym.st_value == 0) {
         continue;
       }
-      if (sym.st_value == 0) {
-        continue;
-      }
-      off = static_cast<uintptr_t>(sym.st_value);
+      offset = static_cast<uintptr_t>(sym.st_value);
       found = true;
       break;
     }
-
     free(strtab);
   }
 
   free(shdrs);
   close(fd);
-
   if (!found) {
     return false;
   }
-  *symOffsetOut = off;
+  *symOffsetOut = offset;
   return true;
 }
 
-bool isExecutableAddress(void *addr) {
-  if (addr == nullptr) {
-    return false;
-  }
-  FILE *fp = fopen("/proc/self/maps", "r");
-  if (fp == nullptr) {
-    return false;
-  }
-  uintptr_t target = reinterpret_cast<uintptr_t>(addr);
-  char line[512] = {0};
-  bool exec = false;
-  while (fgets(line, sizeof(line), fp) != nullptr) {
-    unsigned long long start = 0;
-    unsigned long long end = 0;
-    char perms[8] = {0};
-    if (sscanf(line, "%llx-%llx %7s", &start, &end, perms) != 3) {
-      continue;
-    }
-    if (target >= start && target < end) {
-      exec = (strchr(perms, 'x') != nullptr);
-      break;
-    }
-  }
-  fclose(fp);
-  return exec;
-}
-
-bool patchCodeArm64(void *func, int action) {
-#if defined(__aarch64__)
-  if (func == nullptr) {
-    return false;
-  }
-  if (!makeWritable(func)) {
-    return false;
-  }
-  auto *p = reinterpret_cast<uint32_t *>(func);
-  if (action == kReturnFalse || action == kReturnZero) {
-    p[0] = 0x52800000U;  // mov w0, #0
-    p[1] = 0xD65F03C0U;  // ret
-    __builtin___clear_cache(reinterpret_cast<char *>(p), reinterpret_cast<char *>(p + 2));
+bool resolveOneSymbol(const char *soPath, uintptr_t soBase, const char *sym, void **out) {
+  void *p = dlsym(RTLD_DEFAULT, sym);
+  if (p != nullptr) {
+    memcpy(out, &p, sizeof(p));
     return true;
   }
-  if (action == kReturnVoid) {
-    p[0] = 0xD65F03C0U;  // ret
-    __builtin___clear_cache(reinterpret_cast<char *>(p), reinterpret_cast<char *>(p + 1));
-    return true;
+
+  if (soPath == nullptr || soBase == 0) {
+    return false;
   }
-#else
-  (void)func;
-  (void)action;
-#endif
-  return false;
+  uintptr_t off = 0;
+  if (!resolveElfSymOffset64(soPath, sym, &off) || off == 0) {
+    return false;
+  }
+  p = reinterpret_cast<void *>(soBase + off);
+  memcpy(out, &p, sizeof(p));
+  return true;
 }
 
-bool patchMethodPointer(const void *methodInfo, int action, void *replace, const char *klass, const char *method,
+bool resolveIl2cpp(Il2CppApi &api) {
+  char soPath[512] = {0};
+  uintptr_t soBase = 0;
+  if (!findLoadedSoPath(kIl2cppSo, soPath, sizeof(soPath)) || !findLibraryBase(soPath, &soBase)) {
+    return false;
+  }
+
+  if (!resolveOneSymbol(soPath, soBase, "il2cpp_domain_get", reinterpret_cast<void **>(&api.domain_get))) return false;
+  if (!resolveOneSymbol(soPath, soBase, "il2cpp_thread_attach", reinterpret_cast<void **>(&api.thread_attach)))
+    return false;
+  if (!resolveOneSymbol(soPath, soBase, "il2cpp_domain_get_assemblies",
+                        reinterpret_cast<void **>(&api.domain_get_assemblies)))
+    return false;
+  if (!resolveOneSymbol(soPath, soBase, "il2cpp_assembly_get_image", reinterpret_cast<void **>(&api.assembly_get_image)))
+    return false;
+  if (!resolveOneSymbol(soPath, soBase, "il2cpp_image_get_name", reinterpret_cast<void **>(&api.image_get_name)))
+    return false;
+  if (!resolveOneSymbol(soPath, soBase, "il2cpp_image_get_class_count",
+                        reinterpret_cast<void **>(&api.image_get_class_count)))
+    return false;
+  if (!resolveOneSymbol(soPath, soBase, "il2cpp_image_get_class", reinterpret_cast<void **>(&api.image_get_class)))
+    return false;
+  if (!resolveOneSymbol(soPath, soBase, "il2cpp_class_get_name", reinterpret_cast<void **>(&api.class_get_name)))
+    return false;
+  if (!resolveOneSymbol(soPath, soBase, "il2cpp_class_get_namespace",
+                        reinterpret_cast<void **>(&api.class_get_namespace)))
+    return false;
+  if (!resolveOneSymbol(soPath, soBase, "il2cpp_class_get_methods", reinterpret_cast<void **>(&api.class_get_methods)))
+    return false;
+  if (!resolveOneSymbol(soPath, soBase, "il2cpp_method_get_name", reinterpret_cast<void **>(&api.method_get_name)))
+    return false;
+  if (!resolveOneSymbol(soPath, soBase, "il2cpp_method_get_param_count",
+                        reinterpret_cast<void **>(&api.method_get_param_count)))
+    return false;
+
+  static bool logged = false;
+  if (!logged) {
+    LOGI("il2cpp resolved via ELF fallback");
+    logged = true;
+  }
+  return true;
+}
+
+bool patchMethodPointer(const void *methodInfo, void *replace, const char *klass, const char *method,
                         uint32_t paramCount) {
   auto *m = reinterpret_cast<MethodInfoPatch *>(const_cast<void *>(methodInfo));
-  if (m == nullptr || m->methodPointer == nullptr) {
+  if (m == nullptr || m->methodPointer == nullptr || replace == nullptr) {
     return false;
   }
-
-  void *entry = m->methodPointer;
-  if (isExecutableAddress(entry) && patchCodeArm64(entry, action)) {
-    LOGI("patched-code %s::%s(%u) entry=%p", klass, method, paramCount, entry);
-    return true;
-  }
-
-  if (replace == nullptr || m->methodPointer == replace) {
+  if (m->methodPointer == replace) {
     return false;
   }
   if (!makeWritable(m)) {
     LOGE("mprotect failed: %s::%s", klass, method);
     return false;
   }
-
   void *old = m->methodPointer;
   m->methodPointer = replace;
   __builtin___clear_cache(reinterpret_cast<char *>(m), reinterpret_cast<char *>(m + 1));
-  LOGI("patched-meta %s::%s(%u) old=%p new=%p", klass, method, paramCount, old, replace);
-  return true;
-}
-
-bool resolveIl2cpp(Il2CppApi &api) {
-  char realPath[512] = {0};
-  uintptr_t libBase = 0;
-  bool hasRealPath = false;
-  void *hRealNoLoad = nullptr;
-  void *hRealLoad = nullptr;
-  void *hShortNoLoad = nullptr;
-  void *hShortLoad = nullptr;
-  if (findLoadedSoPath(kIl2cppSo, realPath, sizeof(realPath))) {
-    hasRealPath = true;
-    LOGI("found il2cpp in maps: %s", realPath);
-    int ok = access(realPath, R_OK);
-    LOGI("il2cpp path access=%d errno=%d", ok, ok == 0 ? 0 : errno);
-    if (findLibraryBase(realPath, &libBase)) {
-      LOGI("il2cpp base=%p", reinterpret_cast<void *>(libBase));
-    }
-    hRealNoLoad = dlopen(realPath, RTLD_NOW | RTLD_NOLOAD);
-    hRealLoad = dlopen(realPath, RTLD_NOW);
-  }
-  hShortNoLoad = dlopen(kIl2cppSo, RTLD_NOW | RTLD_NOLOAD);
-  hShortLoad = dlopen(kIl2cppSo, RTLD_NOW);
-
-  auto resolveFn = [&](const char *sym, void **out) -> bool {
-    void *p = dlsym(RTLD_DEFAULT, sym);
-    if (p != nullptr) {
-      memcpy(out, &p, sizeof(p));
-      return true;
-    }
-    if (hRealNoLoad != nullptr) {
-      p = dlsym(hRealNoLoad, sym);
-      if (p != nullptr) {
-        memcpy(out, &p, sizeof(p));
-        return true;
-      }
-    }
-    if (hRealLoad != nullptr) {
-      p = dlsym(hRealLoad, sym);
-      if (p != nullptr) {
-        memcpy(out, &p, sizeof(p));
-        return true;
-      }
-    }
-    if (hShortNoLoad != nullptr) {
-      p = dlsym(hShortNoLoad, sym);
-      if (p != nullptr) {
-        memcpy(out, &p, sizeof(p));
-        return true;
-      }
-    }
-    if (hShortLoad != nullptr) {
-      p = dlsym(hShortLoad, sym);
-      if (p != nullptr) {
-        memcpy(out, &p, sizeof(p));
-        return true;
-      }
-    }
-    if (hasRealPath && libBase != 0) {
-      uintptr_t off = 0;
-      if (resolveElfSymOffset64(realPath, sym, &off) && off != 0) {
-        p = reinterpret_cast<void *>(libBase + off);
-        memcpy(out, &p, sizeof(p));
-        LOGI("resolved by ELF: %s off=0x%zx addr=%p", sym, static_cast<size_t>(off), p);
-        return true;
-      }
-    }
-    LOGE("missing il2cpp export: %s", sym);
-    return false;
-  };
-
-  bool allHandleNull = (hRealNoLoad == nullptr && hRealLoad == nullptr && hShortNoLoad == nullptr &&
-                        hShortLoad == nullptr);
-  if (allHandleNull) {
-    const char *err = dlerror();
-    LOGE("dlopen il2cpp handles all null: %s", err ? err : "<no dlerror>");
-    // Do not return here. RTLD_DEFAULT may still resolve symbols in current linker namespace.
-  }
-
-  if (!resolveFn("il2cpp_domain_get", reinterpret_cast<void **>(&api.domain_get))) return false;
-  if (!resolveFn("il2cpp_thread_attach", reinterpret_cast<void **>(&api.thread_attach))) return false;
-  if (!resolveFn("il2cpp_domain_get_assemblies", reinterpret_cast<void **>(&api.domain_get_assemblies))) return false;
-  if (!resolveFn("il2cpp_assembly_get_image", reinterpret_cast<void **>(&api.assembly_get_image))) return false;
-  if (!resolveFn("il2cpp_image_get_name", reinterpret_cast<void **>(&api.image_get_name))) return false;
-  if (!resolveFn("il2cpp_image_get_class_count", reinterpret_cast<void **>(&api.image_get_class_count))) return false;
-  if (!resolveFn("il2cpp_image_get_class", reinterpret_cast<void **>(&api.image_get_class))) return false;
-  if (!resolveFn("il2cpp_class_get_name", reinterpret_cast<void **>(&api.class_get_name))) return false;
-  if (!resolveFn("il2cpp_class_get_namespace", reinterpret_cast<void **>(&api.class_get_namespace))) return false;
-  if (!resolveFn("il2cpp_class_get_methods", reinterpret_cast<void **>(&api.class_get_methods))) return false;
-  if (!resolveFn("il2cpp_method_get_name", reinterpret_cast<void **>(&api.method_get_name))) return false;
-  if (!resolveFn("il2cpp_method_get_param_count", reinterpret_cast<void **>(&api.method_get_param_count)))
-    return false;
-
-  LOGI("il2cpp symbols resolved");
+  LOGI("patched %s::%s(%u) old=%p new=%p", klass, method, paramCount, old, replace);
   return true;
 }
 
@@ -630,7 +512,6 @@ int patchTargets(Il2CppApi &api, bool strictClass) {
   }
 
   int patched = 0;
-  int foundByName = 0;
   for (size_t i = 0; i < asmCount; i++) {
     const void *assembly = assemblies[i];
     if (assembly == nullptr) {
@@ -670,13 +551,11 @@ int patchTargets(Il2CppApi &api, bool strictClass) {
           if (strcmp(methodName, t.method) != 0) {
             continue;
           }
-          foundByName++;
           if (strictClass && !classMatch(klassName, klassNs, t.classKeyword)) {
             continue;
           }
           void *replace = resolveActionPtr(t.action);
-          if (patchMethodPointer(methodInfo, t.action, replace, klassName ? klassName : "<null>", methodName,
-                                 paramCount)) {
+          if (patchMethodPointer(methodInfo, replace, klassName ? klassName : "<null>", methodName, paramCount)) {
             t.hitCount++;
             patched++;
           }
@@ -684,15 +563,12 @@ int patchTargets(Il2CppApi &api, bool strictClass) {
       }
     }
   }
-  if (foundByName > 0 && patched == 0) {
-    LOGI("found target method names=%d but patch=0 (strict=%d)", foundByName, strictClass ? 1 : 0);
-  }
   return patched;
 }
 
 void *workerThread(void *) {
   for (int i = 0; i < kMaxRetry; i++) {
-    Il2CppApi api{};
+    Il2CppApi api {};
     if (!resolveIl2cpp(api)) {
       if ((i % 10) == 0) {
         LOGI("waiting il2cpp... retry=%d", i);
@@ -712,7 +588,6 @@ void *workerThread(void *) {
       LOGI("il2cpp bypass active: total=%d strict=%d fallback=%d", total, strictPatched, fallbackPatched);
       return nullptr;
     }
-
     sleep(kRetrySleepSec);
   }
 
@@ -743,17 +618,12 @@ class HsahcZygiskModule : public zygisk::ModuleBase {
       bool byName = isTargetProcessName(proc_name_);
       bool byDir = isTargetByDataDir(app_data_dir_);
       target_ = byName || byDir;
-
       recordLastProcess(args->uid, proc_name_, insn_, app_data_dir_, target_);
     }
 
     if (!target_) {
       api_->setOption(zygisk::Option::DLCLOSE_MODULE_LIBRARY);
-      return;
     }
-
-    __android_log_print(ANDROID_LOG_INFO, kLogTag, "target process matched: name=%s dir=%s",
-                        proc_name_[0] ? proc_name_ : "-", app_data_dir_[0] ? app_data_dir_ : "-");
   }
 
   void postAppSpecialize(const AppSpecializeArgs *args) override {
@@ -761,12 +631,11 @@ class HsahcZygiskModule : public zygisk::ModuleBase {
     if (!target_) {
       return;
     }
-
     ensureLogFileReady();
-    LOGI("start patching: name=%s dir=%s isa=%s", proc_name_[0] ? proc_name_ : "-",
-         app_data_dir_[0] ? app_data_dir_ : "-", insn_[0] ? insn_ : "-");
+    LOGI("start patching: name=%s dir=%s isa=%s", proc_name_[0] ? proc_name_ : "-", app_data_dir_[0] ? app_data_dir_ : "-",
+         insn_[0] ? insn_ : "-");
 
-    pthread_t t{};
+    pthread_t t {};
     if (pthread_create(&t, nullptr, workerThread, nullptr) == 0) {
       pthread_detach(t);
     } else {

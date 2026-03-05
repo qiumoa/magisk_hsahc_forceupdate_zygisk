@@ -11,7 +11,7 @@
 - `VersionCompare` -> 强制返回 `0`
 - `ConfirmVersionForceUpdateJumpCallback` -> 空实现（no-op）
 - `VersionForceUpdateJump` -> 空实现（no-op）
-- 模块会在 `libil2cpp` 可用后尽早打补丁，避免启动阶段判断先执行
+- 当前代码已精简为单一路径：`ELF 符号解析 -> 方法指针补丁`
 
 已内置四 ABI：`arm64-v8a`、`armeabi-v7a`、`x86_64`、`x86`。
 
