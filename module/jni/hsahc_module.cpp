@@ -38,7 +38,7 @@ constexpr const char *kCfgPathData = "/data/adb/hsahc_forceupdate_zygisk/config.
 constexpr int kMaxRetry = 180;
 constexpr int kRetrySleepSec = 1;
 constexpr int kDefaultPatchDelaySec = 10;
-constexpr int kMinPatchDelaySec = 0;
+constexpr int kMinPatchDelaySec = 2;
 constexpr int kMaxPatchDelaySec = 60;
 
 int gLogFd = -1;
@@ -277,6 +277,7 @@ TargetSpec gTargets[] = {
     {"VersionCompare", "GameMgr", kReturnZero, 0},
     {"ConfirmVersionForceUpdateJumpCallback", "GameMgr", kReturnVoid, 0},
     {"VersionForceUpdateJump", "GameMgr", kReturnVoid, 0},
+    {"versionForceUpdateJump", "GameMgr", kReturnVoid, 0},
 };
 
 void *resolveActionPtr(int action) {
@@ -666,6 +667,9 @@ void *workerThread(void *) {
     int total = strictPatched + fallbackPatched;
     if (total > 0) {
       LOGI("il2cpp bypass active: total=%d strict=%d fallback=%d", total, strictPatched, fallbackPatched);
+      for (auto &t : gTargets) {
+        LOGI("target hit: %s count=%d", t.method, t.hitCount);
+      }
       return nullptr;
     }
     sleep(kRetrySleepSec);

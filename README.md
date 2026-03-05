@@ -12,7 +12,7 @@
 - `ConfirmVersionForceUpdateJumpCallback` -> 空实现（no-op）
 - `VersionForceUpdateJump` -> 空实现（no-op）
 - 当前代码已精简为单一路径：`ELF 符号解析 -> 方法指针补丁`（含短暂稳定等待，避免早期闪退）
-- 补丁延迟支持配置：`patch_delay_sec`（0-60）
+- 补丁延迟支持配置：`patch_delay_sec`（2-60，低于 2 会自动按 2 处理）
 
 已内置四 ABI：`arm64-v8a`、`armeabi-v7a`、`x86_64`、`x86`。
 
