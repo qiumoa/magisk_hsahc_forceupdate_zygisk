@@ -87,6 +87,8 @@ while [ "$i" -lt "$RETRY_COUNT" ]; do
   target_hash="$(sha256sum "$TARGET_SO" | awk '{print $1}')"
   patch_hash="$(sha256sum "$PATCH_SO" | awk '{print $1}')"
 
+  logi "target_hash=$target_hash patch_hash=$patch_hash"
+
   if [ "$target_hash" = "$patch_hash" ]; then
     logi "target already patched"
     exit 0
@@ -105,6 +107,7 @@ while [ "$i" -lt "$RETRY_COUNT" ]; do
 
   if mount -o bind "$PATCH_SO" "$TARGET_SO"; then
     new_hash="$(sha256sum "$TARGET_SO" | awk '{print $1}')"
+    logi "mount done: new_hash=$new_hash"
     if [ "$new_hash" = "$patch_hash" ]; then
       logi "bind mount success"
       exit 0
