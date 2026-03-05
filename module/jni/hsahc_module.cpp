@@ -641,7 +641,9 @@ int patchTargets(Il2CppApi &api, bool strictClass) {
       continue;
     }
     const char *imgName = api.image_get_name(image);
-    (void)imgName;
+    if (imgName == nullptr || strstr(imgName, "Assembly-CSharp") == nullptr) {
+      continue;
+    }
 
     size_t classCount = api.image_get_class_count(image);
     for (size_t c = 0; c < classCount; c++) {
@@ -689,11 +691,22 @@ int patchTargets(Il2CppApi &api, bool strictClass) {
 }
 
 void *workerThread(void *) {
+  time_t startedAt = time(nullptr);
   for (int i = 0; i < kMaxRetry; i++) {
     Il2CppApi api{};
     if (!resolveIl2cpp(api)) {
       if ((i % 10) == 0) {
         LOGI("waiting il2cpp... retry=%d", i);
+      }
+      sleep(kRetrySleepSec);
+      continue;
+    }
+
+    // il2cpp symbols may be visible before VM is stable. Delay patching to reduce startup crash risk.
+    time_t now = time(nullptr);
+    if ((now - startedAt) < 12) {
+      if ((i % 5) == 0) {
+        LOGI("il2cpp ready but waiting VM stabilize... elapsed=%llds", static_cast<long long>(now - startedAt));
       }
       sleep(kRetrySleepSec);
       continue;
