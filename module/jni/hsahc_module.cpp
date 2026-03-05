@@ -248,6 +248,38 @@ bool makeWritable(void *addr) {
                   PROT_READ | PROT_WRITE | PROT_EXEC) == 0;
 }
 
+bool findLoadedSoPath(const char *soname, char *out, size_t outSize) {
+  if (soname == nullptr || out == nullptr || outSize == 0) {
+    return false;
+  }
+  out[0] = '\0';
+  FILE *fp = fopen("/proc/self/maps", "r");
+  if (fp == nullptr) {
+    return false;
+  }
+  char line[1024] = {0};
+  bool found = false;
+  while (fgets(line, sizeof(line), fp) != nullptr) {
+    const char *p = strstr(line, soname);
+    if (p == nullptr) {
+      continue;
+    }
+    while (p > line && *(p - 1) != ' ') {
+      --p;
+    }
+    size_t len = strcspn(p, "\r\n");
+    if (len == 0 || len >= outSize) {
+      continue;
+    }
+    memcpy(out, p, len);
+    out[len] = '\0';
+    found = true;
+    break;
+  }
+  fclose(fp);
+  return found;
+}
+
 bool isExecutableAddress(void *addr) {
   if (addr == nullptr) {
     return false;
@@ -331,7 +363,18 @@ bool patchMethodPointer(const void *methodInfo, int action, void *replace, const
 }
 
 bool resolveIl2cpp(Il2CppApi &api) {
-  void *h = dlopen(kIl2cppSo, RTLD_NOW | RTLD_NOLOAD);
+  char realPath[512] = {0};
+  void *h = nullptr;
+  if (findLoadedSoPath(kIl2cppSo, realPath, sizeof(realPath))) {
+    LOGI("found il2cpp in maps: %s", realPath);
+    h = dlopen(realPath, RTLD_NOW | RTLD_NOLOAD);
+    if (h == nullptr) {
+      h = dlopen(realPath, RTLD_NOW);
+    }
+  }
+  if (h == nullptr) {
+    h = dlopen(kIl2cppSo, RTLD_NOW | RTLD_NOLOAD);
+  }
   if (h == nullptr) {
     h = dlopen(kIl2cppSo, RTLD_NOW);
   }
@@ -363,6 +406,7 @@ bool resolveIl2cpp(Il2CppApi &api) {
   if (!resolveFn("il2cpp_method_get_param_count", reinterpret_cast<void **>(&api.method_get_param_count)))
     return false;
 
+  LOGI("il2cpp symbols resolved");
   return true;
 }
 
