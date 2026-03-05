@@ -27,13 +27,13 @@ build_zygisk_module.cmd -AndroidNdk "D:/Android/Sdk/ndk/26.3.11579264"
 
 输出文件：
 
-- `out/hsahc_forceupdate_zygisk.zip`
+- `out/hsahc_forceupdate_zygisk_module.zip`
 
 ## 安装方式
 
 1. 在 Magisk App 中安装模块 zip：
-   - 本地构建：安装 `out/hsahc_forceupdate_zygisk.zip`
-   - GitHub：到仓库 `Releases` 页面，下载资产 `hsahc_forceupdate_zygisk.zip` 直接安装
+   - 本地构建：安装 `out/hsahc_forceupdate_zygisk_module.zip`
+   - GitHub：到仓库 `Releases` 页面，下载资产 `hsahc_forceupdate_zygisk_module.zip` 直接安装
 2. 不要安装 `Source code (zip)`，那不是模块包
 3. 确认 Magisk `>= 26.0` 且已开启 `Zygisk`
 4. 安装完成后重启手机

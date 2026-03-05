@@ -84,7 +84,7 @@ Copy-Item -Recurse -Force $MetaInfSrc $MetaInfDst
 Copy-Item -Force $CustomizeSrc (Join-Path $StageDir "customize.sh")
 Copy-Item -Force $ConfigSrc (Join-Path $StageDir "config.prop")
 
-$ZipPath = Join-Path $OutRoot "hsahc_forceupdate_zygisk.zip"
+$ZipPath = Join-Path $OutRoot "hsahc_forceupdate_zygisk_module.zip"
 if (Test-Path $ZipPath) {
   Remove-Item -Force $ZipPath
 }

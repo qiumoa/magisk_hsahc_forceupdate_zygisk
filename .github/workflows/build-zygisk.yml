@@ -61,21 +61,23 @@ jobs:
           cp module/jni/libs/armeabi-v7a/libhsahc_zygisk.so out/stage/zygisk/armeabi-v7a.so
           cp module/jni/libs/x86_64/libhsahc_zygisk.so out/stage/zygisk/x86_64.so
           cp module/jni/libs/x86/libhsahc_zygisk.so out/stage/zygisk/x86.so
+          chmod 0755 out/stage/META-INF/com/google/android/update-binary
+          chmod 0755 out/stage/customize.sh
           test -f out/stage/META-INF/com/google/android/update-binary
           test -f out/stage/META-INF/com/google/android/updater-script
           cd out/stage
-          zip -r -9 ../hsahc_forceupdate_zygisk.zip ./*
+          zip -r -9 ../hsahc_forceupdate_zygisk_module.zip ./*
           cd ..
-          unzip -l hsahc_forceupdate_zygisk.zip | grep -q "module.prop"
-          unzip -l hsahc_forceupdate_zygisk.zip | grep -q "config.prop"
-          unzip -l hsahc_forceupdate_zygisk.zip | grep -q "META-INF/com/google/android/update-binary"
-          unzip -l hsahc_forceupdate_zygisk.zip | grep -q "META-INF/com/google/android/updater-script"
-          unzip -l hsahc_forceupdate_zygisk.zip | grep -q "zygisk/arm64-v8a.so"
-          unzip -l hsahc_forceupdate_zygisk.zip | grep -q "zygisk/armeabi-v7a.so"
-          unzip -l hsahc_forceupdate_zygisk.zip | grep -q "zygisk/x86_64.so"
-          unzip -l hsahc_forceupdate_zygisk.zip | grep -q "zygisk/x86.so"
+          unzip -l hsahc_forceupdate_zygisk_module.zip | grep -q "module.prop"
+          unzip -l hsahc_forceupdate_zygisk_module.zip | grep -q "config.prop"
+          unzip -l hsahc_forceupdate_zygisk_module.zip | grep -q "META-INF/com/google/android/update-binary"
+          unzip -l hsahc_forceupdate_zygisk_module.zip | grep -q "META-INF/com/google/android/updater-script"
+          unzip -l hsahc_forceupdate_zygisk_module.zip | grep -q "zygisk/arm64-v8a.so"
+          unzip -l hsahc_forceupdate_zygisk_module.zip | grep -q "zygisk/armeabi-v7a.so"
+          unzip -l hsahc_forceupdate_zygisk_module.zip | grep -q "zygisk/x86_64.so"
+          unzip -l hsahc_forceupdate_zygisk_module.zip | grep -q "zygisk/x86.so"
           ls -lah
-          sha256sum hsahc_forceupdate_zygisk.zip > SHA256SUMS.txt
+          sha256sum hsahc_forceupdate_zygisk_module.zip > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: Setup release metadata
@@ -99,5 +101,5 @@ jobs:
           target_commitish: ${{ github.sha }}
           prerelease: true
           files: |
-            out/hsahc_forceupdate_zygisk.zip
+            out/hsahc_forceupdate_zygisk_module.zip
             out/SHA256SUMS.txt
