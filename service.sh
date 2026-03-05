@@ -51,21 +51,33 @@ if ! command -v sha256sum >/dev/null 2>&1; then
   exit 1
 fi
 
-APK_PATH="$(pm path "$TARGET_PACKAGE" 2>/dev/null | sed -n 's/^package://p' | head -n 1)"
-if [ -z "$APK_PATH" ]; then
-  loge "target package not found: $TARGET_PACKAGE"
-  exit 1
-fi
+resolve_apk_path() {
+  p="$(pm path --user 0 "$TARGET_PACKAGE" 2>/dev/null | sed -n 's/^package://p' | head -n 1)"
+  [ -n "$p" ] || p="$(pm path "$TARGET_PACKAGE" 2>/dev/null | sed -n 's/^package://p' | head -n 1)"
+  [ -n "$p" ] || p="$(cmd package path "$TARGET_PACKAGE" 2>/dev/null | sed -n 's/^package://p' | head -n 1)"
+  echo "$p"
+}
 
-APP_DIR="$(dirname "$APK_PATH")"
-TARGET_SO="$APP_DIR/$TARGET_LIB_RELPATH"
-logi "module start: package=$TARGET_PACKAGE target=$TARGET_SO"
+logi "module start: package=$TARGET_PACKAGE relpath=$TARGET_LIB_RELPATH"
 
 i=0
 while [ "$i" -lt "$RETRY_COUNT" ]; do
+  APK_PATH="$(resolve_apk_path)"
+  if [ -z "$APK_PATH" ]; then
+    if [ $((i % 10)) -eq 0 ]; then
+      logi "waiting package manager... retry=$i package=$TARGET_PACKAGE"
+    fi
+    i=$((i + 1))
+    sleep "$RETRY_INTERVAL_SEC"
+    continue
+  fi
+
+  APP_DIR="$(dirname "$APK_PATH")"
+  TARGET_SO="$APP_DIR/$TARGET_LIB_RELPATH"
+
   if [ ! -f "$TARGET_SO" ]; then
     if [ $((i % 10)) -eq 0 ]; then
-      logi "waiting target so... retry=$i"
+      logi "waiting target so... retry=$i target=$TARGET_SO"
     fi
     i=$((i + 1))
     sleep "$RETRY_INTERVAL_SEC"
