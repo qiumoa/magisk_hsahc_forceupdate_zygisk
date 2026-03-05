@@ -4,7 +4,9 @@
 #include <pthread.h>
 
 #include <errno.h>
+#include <elf.h>
 #include <fcntl.h>
+#include <stdlib.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -280,6 +282,150 @@ bool findLoadedSoPath(const char *soname, char *out, size_t outSize) {
   return found;
 }
 
+bool findLibraryBase(const char *fullPath, uintptr_t *baseOut) {
+  if (fullPath == nullptr || baseOut == nullptr) {
+    return false;
+  }
+  FILE *fp = fopen("/proc/self/maps", "r");
+  if (fp == nullptr) {
+    return false;
+  }
+  bool found = false;
+  uintptr_t best = 0;
+  char line[1024] = {0};
+  while (fgets(line, sizeof(line), fp) != nullptr) {
+    if (strstr(line, fullPath) == nullptr) {
+      continue;
+    }
+    unsigned long long start = 0;
+    unsigned long long end = 0;
+    unsigned long long offset = 0;
+    char perms[8] = {0};
+    if (sscanf(line, "%llx-%llx %7s %llx", &start, &end, perms, &offset) < 4) {
+      continue;
+    }
+    uintptr_t base = static_cast<uintptr_t>(start - offset);
+    if (!found || base < best) {
+      best = base;
+      found = true;
+    }
+  }
+  fclose(fp);
+  if (!found) {
+    return false;
+  }
+  *baseOut = best;
+  return true;
+}
+
+bool preadAll(int fd, void *buf, size_t size, off_t off) {
+  char *p = reinterpret_cast<char *>(buf);
+  size_t done = 0;
+  while (done < size) {
+    ssize_t n = pread(fd, p + done, size - done, off + static_cast<off_t>(done));
+    if (n <= 0) {
+      return false;
+    }
+    done += static_cast<size_t>(n);
+  }
+  return true;
+}
+
+bool resolveElfSymOffset64(const char *path, const char *symName, uintptr_t *symOffsetOut) {
+  if (path == nullptr || symName == nullptr || symOffsetOut == nullptr) {
+    return false;
+  }
+
+  int fd = open(path, O_RDONLY | O_CLOEXEC);
+  if (fd < 0) {
+    return false;
+  }
+
+  Elf64_Ehdr eh {};
+  if (!preadAll(fd, &eh, sizeof(eh), 0)) {
+    close(fd);
+    return false;
+  }
+  if (memcmp(eh.e_ident, ELFMAG, SELFMAG) != 0 || eh.e_ident[EI_CLASS] != ELFCLASS64 ||
+      eh.e_shoff == 0 || eh.e_shentsize != sizeof(Elf64_Shdr) || eh.e_shnum == 0) {
+    close(fd);
+    return false;
+  }
+
+  size_t shdrSize = static_cast<size_t>(eh.e_shnum) * sizeof(Elf64_Shdr);
+  auto *shdrs = reinterpret_cast<Elf64_Shdr *>(malloc(shdrSize));
+  if (shdrs == nullptr) {
+    close(fd);
+    return false;
+  }
+  if (!preadAll(fd, shdrs, shdrSize, static_cast<off_t>(eh.e_shoff))) {
+    free(shdrs);
+    close(fd);
+    return false;
+  }
+
+  bool found = false;
+  uintptr_t off = 0;
+  for (uint16_t i = 0; i < eh.e_shnum && !found; ++i) {
+    Elf64_Shdr &symSec = shdrs[i];
+    if (!(symSec.sh_type == SHT_DYNSYM || symSec.sh_type == SHT_SYMTAB) || symSec.sh_entsize != sizeof(Elf64_Sym)) {
+      continue;
+    }
+    if (symSec.sh_link >= eh.e_shnum) {
+      continue;
+    }
+    Elf64_Shdr &strSec = shdrs[symSec.sh_link];
+    if (strSec.sh_size == 0) {
+      continue;
+    }
+
+    auto *strtab = reinterpret_cast<char *>(malloc(static_cast<size_t>(strSec.sh_size)));
+    if (strtab == nullptr) {
+      continue;
+    }
+    if (!preadAll(fd, strtab, static_cast<size_t>(strSec.sh_size), static_cast<off_t>(strSec.sh_offset))) {
+      free(strtab);
+      continue;
+    }
+
+    size_t symCount = static_cast<size_t>(symSec.sh_size / sizeof(Elf64_Sym));
+    Elf64_Sym sym {};
+    for (size_t k = 0; k < symCount; ++k) {
+      off_t sOff = static_cast<off_t>(symSec.sh_offset + k * sizeof(Elf64_Sym));
+      if (!preadAll(fd, &sym, sizeof(sym), sOff)) {
+        break;
+      }
+      if (sym.st_name >= strSec.sh_size) {
+        continue;
+      }
+      const char *name = strtab + sym.st_name;
+      if (name == nullptr || *name == '\0') {
+        continue;
+      }
+      if (strcmp(name, symName) != 0) {
+        continue;
+      }
+      if (sym.st_value == 0) {
+        continue;
+      }
+      off = static_cast<uintptr_t>(sym.st_value);
+      found = true;
+      break;
+    }
+
+    free(strtab);
+  }
+
+  free(shdrs);
+  close(fd);
+
+  if (!found) {
+    return false;
+  }
+  *symOffsetOut = off;
+  return true;
+}
+
 bool isExecutableAddress(void *addr) {
   if (addr == nullptr) {
     return false;
@@ -364,14 +510,20 @@ bool patchMethodPointer(const void *methodInfo, int action, void *replace, const
 
 bool resolveIl2cpp(Il2CppApi &api) {
   char realPath[512] = {0};
+  uintptr_t libBase = 0;
+  bool hasRealPath = false;
   void *hRealNoLoad = nullptr;
   void *hRealLoad = nullptr;
   void *hShortNoLoad = nullptr;
   void *hShortLoad = nullptr;
   if (findLoadedSoPath(kIl2cppSo, realPath, sizeof(realPath))) {
+    hasRealPath = true;
     LOGI("found il2cpp in maps: %s", realPath);
     int ok = access(realPath, R_OK);
     LOGI("il2cpp path access=%d errno=%d", ok, ok == 0 ? 0 : errno);
+    if (findLibraryBase(realPath, &libBase)) {
+      LOGI("il2cpp base=%p", reinterpret_cast<void *>(libBase));
+    }
     hRealNoLoad = dlopen(realPath, RTLD_NOW | RTLD_NOLOAD);
     hRealLoad = dlopen(realPath, RTLD_NOW);
   }
@@ -409,6 +561,15 @@ bool resolveIl2cpp(Il2CppApi &api) {
       p = dlsym(hShortLoad, sym);
       if (p != nullptr) {
         memcpy(out, &p, sizeof(p));
+        return true;
+      }
+    }
+    if (hasRealPath && libBase != 0) {
+      uintptr_t off = 0;
+      if (resolveElfSymOffset64(realPath, sym, &off) && off != 0) {
+        p = reinterpret_cast<void *>(libBase + off);
+        memcpy(out, &p, sizeof(p));
+        LOGI("resolved by ELF: %s off=0x%zx addr=%p", sym, static_cast<size_t>(off), p);
         return true;
       }
     }
