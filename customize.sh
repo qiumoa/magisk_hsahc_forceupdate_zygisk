@@ -7,6 +7,7 @@ LATESTARTSERVICE=false
 
 print_modname() {
   ui_print "*******************************"
-  ui_print "  HSAHC 强更绕过 (Zygisk)   "
+  ui_print "  HSAHC ForceUpdate Bypass     "
+  ui_print "  (Zygisk)                     "
   ui_print "*******************************"
 }
