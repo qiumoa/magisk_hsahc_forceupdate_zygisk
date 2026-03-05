@@ -13,4 +13,4 @@ strict_sha256_check=1
 
 # 当前适配版本的原始 / 补丁后 libil2cpp.so 哈希
 orig_libil2cpp_sha256=7a9fdc8f621c39246c77cd02d8f291f2f26c6d3cee0da9b1820f67e1d954922b
-patched_libil2cpp_sha256=2d611047b02afbfbcfe404518956236223b323ec95b23ad358b5f6cd676e3bd2
+patched_libil2cpp_sha256=29a506d5f2cc58a7ae8f34041e889fab57bcba8a40e8cbb33d17e9b6cfa2e7c9

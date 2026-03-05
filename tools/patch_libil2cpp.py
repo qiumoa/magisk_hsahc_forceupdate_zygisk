@@ -18,6 +18,7 @@ PATCHES = {
     0x17351B4: bytes.fromhex("00008052c0035fd6"),  # VersionCompare -> 0
     0x1736F80: bytes.fromhex("c0035fd61f2003d5"),  # ConfirmVersionForceUpdateJumpCallback -> void
     0x1739C9C: bytes.fromhex("00008052c0035fd6"),  # IsVersionLessThanTargetVersion -> false
+    0x17348CC: bytes.fromhex("0d000014"),  # RequestGameControlCallback: force branch to 0x1734900 (continue flow)
     0x1599528: bytes.fromhex("c0035fd61f2003d5"),  # ShowNativeQuitDialog -> void
     0x159AB40: bytes.fromhex("c0035fd61f2003d5"),  # VersionForceUpdateJump -> void
     0x159ABE0: bytes.fromhex("c0035fd61f2003d5"),  # OpenNativeBrowser -> void

@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python:*)",
+      "Bash(where python:*)",
+      "Bash(git add:*)"
+    ]
+  }
+}

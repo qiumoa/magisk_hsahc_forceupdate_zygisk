@@ -1,7 +1,7 @@
 id=hsahc_forceupdate_zygisk
 name=HSAHC ForceUpdate Bypass (Static Mount)
-version=v2.0.1
-versionCode=201
+version=v2.0.2
+versionCode=202
 author=qiumoa
 minMagisk=26000
 description=Static patched libil2cpp bind-mount module for com.lta.hsahc.aligames
