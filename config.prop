@@ -1,3 +1,16 @@
-# Patch delay seconds before calling il2cpp domain APIs.
-# Range: 2-60
-patch_delay_sec=2
+# 目标包名
+target_package=com.lta.hsahc.aligames
+
+# 目标库相对路径（相对于 /data/app/.../<pkg-随机>/）
+target_lib_relpath=lib/arm64/libil2cpp.so
+
+# 挂载重试次数与间隔（启动后）
+retry_count=180
+retry_interval_sec=1
+
+# 是否严格校验哈希：1=是，0=否
+strict_sha256_check=1
+
+# 当前适配版本的原始 / 补丁后 libil2cpp.so 哈希
+orig_libil2cpp_sha256=7a9fdc8f621c39246c77cd02d8f291f2f26c6d3cee0da9b1820f67e1d954922b
+patched_libil2cpp_sha256=2d611047b02afbfbcfe404518956236223b323ec95b23ad358b5f6cd676e3bd2

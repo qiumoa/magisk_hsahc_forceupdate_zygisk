@@ -1,92 +1,55 @@
 param(
-  [string]$AndroidNdk = "",
   [string]$OutDir = "out"
 )
 
 $ErrorActionPreference = "Stop"
-
-function Resolve-NdkPath {
-  param([string]$InputPath)
-
-  if ($InputPath -and (Test-Path $InputPath)) {
-    return (Resolve-Path $InputPath).Path
-  }
-  if ($env:ANDROID_NDK_HOME -and (Test-Path $env:ANDROID_NDK_HOME)) {
-    return (Resolve-Path $env:ANDROID_NDK_HOME).Path
-  }
-  if ($env:ANDROID_NDK_ROOT -and (Test-Path $env:ANDROID_NDK_ROOT)) {
-    return (Resolve-Path $env:ANDROID_NDK_ROOT).Path
-  }
-  throw "Android NDK not found. Please pass -AndroidNdk or set ANDROID_NDK_HOME."
-}
-
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$NdkRoot = Resolve-NdkPath -InputPath $AndroidNdk
-$NdkBuild = Join-Path $NdkRoot "ndk-build.cmd"
-if (!(Test-Path $NdkBuild)) {
-  throw "ndk-build.cmd not found in: $NdkRoot"
-}
-
-Write-Host "[build] root: $Root"
-Write-Host "[build] ndk : $NdkRoot"
-
-$JniDir = Join-Path $Root "module/jni"
-Push-Location $JniDir
-try {
-  & $NdkBuild NDK_PROJECT_PATH=. APP_BUILD_SCRIPT=Android.mk NDK_APPLICATION_MK=Application.mk -j4
-  if ($LASTEXITCODE -ne 0) {
-    throw "ndk-build failed with exit code $LASTEXITCODE"
-  }
-} finally {
-  Pop-Location
-}
 
 $OutRoot = Join-Path $Root $OutDir
 $StageDir = Join-Path $OutRoot "stage"
-$ZygiskDir = Join-Path $StageDir "zygisk"
+$FilesDir = Join-Path $StageDir "files"
 $MetaInfSrc = Join-Path $Root "META-INF"
 $MetaInfDst = Join-Path $StageDir "META-INF"
-$CustomizeSrc = Join-Path $Root "customize.sh"
-$ConfigSrc = Join-Path $Root "config.prop"
-$AbiList = @("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
+$PatchedSo = Join-Path $Root "files/libil2cpp_arm64_patched.so"
 
-if (!(Test-Path $MetaInfSrc)) {
-  throw "META-INF not found: $MetaInfSrc"
-}
-if (!(Test-Path (Join-Path $MetaInfSrc "com/google/android/update-binary"))) {
-  throw "update-binary not found under META-INF/com/google/android"
-}
-if (!(Test-Path (Join-Path $MetaInfSrc "com/google/android/updater-script"))) {
-  throw "updater-script not found under META-INF/com/google/android"
-}
-if (!(Test-Path $CustomizeSrc)) {
-  throw "customize.sh not found: $CustomizeSrc"
-}
-if (!(Test-Path $ConfigSrc)) {
-  throw "config.prop not found: $ConfigSrc"
+Write-Host "[build] root: $Root"
+
+$required = @(
+  (Join-Path $Root "module.prop"),
+  (Join-Path $Root "customize.sh"),
+  (Join-Path $Root "config.prop"),
+  (Join-Path $Root "post-fs-data.sh"),
+  (Join-Path $Root "service.sh"),
+  $PatchedSo,
+  (Join-Path $MetaInfSrc "com/google/android/update-binary"),
+  (Join-Path $MetaInfSrc "com/google/android/updater-script")
+)
+foreach ($f in $required) {
+  if (!(Test-Path $f)) {
+    throw "required file not found: $f"
+  }
 }
 
 if (Test-Path $StageDir) {
   Remove-Item -Recurse -Force $StageDir
 }
-New-Item -ItemType Directory -Path $ZygiskDir -Force | Out-Null
+New-Item -ItemType Directory -Path $FilesDir -Force | Out-Null
 
 Copy-Item -Force (Join-Path $Root "module.prop") (Join-Path $StageDir "module.prop")
-foreach ($abi in $AbiList) {
-  $src = Join-Path $Root "module/jni/libs/$abi/libhsahc_zygisk.so"
-  $dst = Join-Path $ZygiskDir "$abi.so"
-  if (!(Test-Path $src)) {
-    throw "built library not found for abi '$abi': $src"
-  }
-  Copy-Item -Force $src $dst
-}
+Copy-Item -Force (Join-Path $Root "customize.sh") (Join-Path $StageDir "customize.sh")
+Copy-Item -Force (Join-Path $Root "config.prop") (Join-Path $StageDir "config.prop")
+Copy-Item -Force (Join-Path $Root "post-fs-data.sh") (Join-Path $StageDir "post-fs-data.sh")
+Copy-Item -Force (Join-Path $Root "service.sh") (Join-Path $StageDir "service.sh")
+Copy-Item -Force $PatchedSo (Join-Path $FilesDir "libil2cpp_arm64_patched.so")
 Copy-Item -Recurse -Force $MetaInfSrc $MetaInfDst
-Copy-Item -Force $CustomizeSrc (Join-Path $StageDir "customize.sh")
-Copy-Item -Force $ConfigSrc (Join-Path $StageDir "config.prop")
 
 $ZipPath = Join-Path $OutRoot "hsahc_forceupdate_zygisk_module.zip"
+$InstallZipPath = Join-Path $OutRoot "INSTALL_ME_hsahc_forceupdate_zygisk_module.zip"
 if (Test-Path $ZipPath) {
   Remove-Item -Force $ZipPath
+}
+if (Test-Path $InstallZipPath) {
+  Remove-Item -Force $InstallZipPath
 }
 New-Item -ItemType Directory -Path $OutRoot -Force | Out-Null
 
@@ -105,4 +68,7 @@ try {
   Pop-Location
 }
 
+Copy-Item -Force $ZipPath $InstallZipPath
+
 Write-Host "[build] output zip: $ZipPath"
+Write-Host "[build] install zip: $InstallZipPath"

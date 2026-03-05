@@ -1,4 +1,4 @@
-name: Build Zygisk Module
+﻿name: Build Static Mount Module
 
 on:
   workflow_dispatch:
@@ -9,9 +9,11 @@ on:
         type: string
   push:
     paths:
-      - "module/**"
+      - "files/**"
       - "META-INF/**"
       - "customize.sh"
+      - "post-fs-data.sh"
+      - "service.sh"
       - "config.prop"
       - ".github/workflows/build-zygisk.yml"
       - "module.prop"
@@ -31,40 +33,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install NDK
-        run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "ndk;26.3.11579264"
-
-      - name: Build zygisk libraries
-        run: |
-          export NDK="$ANDROID_SDK_ROOT/ndk/26.3.11579264"
-          cd module/jni
-          "$NDK/ndk-build" NDK_PROJECT_PATH=. APP_BUILD_SCRIPT=Android.mk NDK_APPLICATION_MK=Application.mk -j4
-          ls -lah libs/arm64-v8a
-          ls -lah libs/armeabi-v7a
-          ls -lah libs/x86_64
-          ls -lah libs/x86
-
       - name: Package magisk module zip
         run: |
-          mkdir -p out/stage/zygisk
+          mkdir -p out/stage/files
           mkdir -p out/stage/META-INF
           cp module.prop out/stage/module.prop
           cp customize.sh out/stage/customize.sh
+          cp post-fs-data.sh out/stage/post-fs-data.sh
+          cp service.sh out/stage/service.sh
           cp config.prop out/stage/config.prop
           cp -r META-INF/com out/stage/META-INF/com
-          cp module/jni/libs/arm64-v8a/libhsahc_zygisk.so out/stage/zygisk/arm64-v8a.so
-          cp module/jni/libs/armeabi-v7a/libhsahc_zygisk.so out/stage/zygisk/armeabi-v7a.so
-          cp module/jni/libs/x86_64/libhsahc_zygisk.so out/stage/zygisk/x86_64.so
-          cp module/jni/libs/x86/libhsahc_zygisk.so out/stage/zygisk/x86.so
+          cp files/libil2cpp_arm64_patched.so out/stage/files/libil2cpp_arm64_patched.so
           chmod 0755 out/stage/META-INF/com/google/android/update-binary
           chmod 0755 out/stage/customize.sh
+          chmod 0755 out/stage/post-fs-data.sh
+          chmod 0755 out/stage/service.sh
           test -f out/stage/META-INF/com/google/android/update-binary
           test -f out/stage/META-INF/com/google/android/updater-script
+          test -f out/stage/post-fs-data.sh
+          test -f out/stage/service.sh
+          test -f out/stage/files/libil2cpp_arm64_patched.so
           cd out/stage
           zip -r -9 ../hsahc_forceupdate_zygisk_module.zip ./*
           cd ..
@@ -73,10 +61,9 @@ jobs:
           unzip -l hsahc_forceupdate_zygisk_module.zip | grep -q "config.prop"
           unzip -l hsahc_forceupdate_zygisk_module.zip | grep -q "META-INF/com/google/android/update-binary"
           unzip -l hsahc_forceupdate_zygisk_module.zip | grep -q "META-INF/com/google/android/updater-script"
-          unzip -l hsahc_forceupdate_zygisk_module.zip | grep -q "zygisk/arm64-v8a.so"
-          unzip -l hsahc_forceupdate_zygisk_module.zip | grep -q "zygisk/armeabi-v7a.so"
-          unzip -l hsahc_forceupdate_zygisk_module.zip | grep -q "zygisk/x86_64.so"
-          unzip -l hsahc_forceupdate_zygisk_module.zip | grep -q "zygisk/x86.so"
+          unzip -l hsahc_forceupdate_zygisk_module.zip | grep -q "post-fs-data.sh"
+          unzip -l hsahc_forceupdate_zygisk_module.zip | grep -q "service.sh"
+          unzip -l hsahc_forceupdate_zygisk_module.zip | grep -q "files/libil2cpp_arm64_patched.so"
           ls -lah
           sha256sum hsahc_forceupdate_zygisk_module.zip INSTALL_ME_hsahc_forceupdate_zygisk_module.zip > SHA256SUMS.txt
           cat SHA256SUMS.txt
@@ -86,13 +73,13 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             TAG="${{ github.event.inputs.release_tag }}"
             if [ -z "${TAG}" ]; then
-              TAG="zygisk-manual-${GITHUB_RUN_NUMBER}"
+              TAG="static-manual-${GITHUB_RUN_NUMBER}"
             fi
           else
-            TAG="zygisk-auto-${GITHUB_RUN_NUMBER}"
+            TAG="static-auto-${GITHUB_RUN_NUMBER}"
           fi
           echo "RELEASE_TAG=${TAG}" >> "${GITHUB_ENV}"
-          echo "RELEASE_NAME=HSAHC Zygisk ${TAG}" >> "${GITHUB_ENV}"
+          echo "RELEASE_NAME=HSAHC Static Mount ${TAG}" >> "${GITHUB_ENV}"
 
       - name: Publish release assets
         uses: softprops/action-gh-release@v2
@@ -102,10 +89,10 @@ jobs:
           target_commitish: ${{ github.sha }}
           prerelease: true
           body: |
-            安装请只下载：
+            Install this file:
             - INSTALL_ME_hsahc_forceupdate_zygisk_module.zip
 
-            不要下载：
+            Do not install:
             - Source code (zip)
             - Source code (tar.gz)
           files: |
