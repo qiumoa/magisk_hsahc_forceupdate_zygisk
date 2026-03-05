@@ -567,11 +567,22 @@ int patchTargets(Il2CppApi &api, bool strictClass) {
 }
 
 void *workerThread(void *) {
+  time_t startedAt = time(nullptr);
   for (int i = 0; i < kMaxRetry; i++) {
     Il2CppApi api {};
     if (!resolveIl2cpp(api)) {
       if ((i % 10) == 0) {
         LOGI("waiting il2cpp... retry=%d", i);
+      }
+      sleep(kRetrySleepSec);
+      continue;
+    }
+
+    // Delay a bit after il2cpp appears to avoid crashing on early domain access.
+    time_t now = time(nullptr);
+    if ((now - startedAt) < 10) {
+      if ((i % 5) == 0) {
+        LOGI("il2cpp ready, wait VM stabilize... elapsed=%llds", static_cast<long long>(now - startedAt));
       }
       sleep(kRetrySleepSec);
       continue;
