@@ -68,6 +68,7 @@ jobs:
           cd out/stage
           zip -r -9 ../hsahc_forceupdate_zygisk_module.zip ./*
           cd ..
+          cp hsahc_forceupdate_zygisk_module.zip INSTALL_ME_hsahc_forceupdate_zygisk_module.zip
           unzip -l hsahc_forceupdate_zygisk_module.zip | grep -q "module.prop"
           unzip -l hsahc_forceupdate_zygisk_module.zip | grep -q "config.prop"
           unzip -l hsahc_forceupdate_zygisk_module.zip | grep -q "META-INF/com/google/android/update-binary"
@@ -77,7 +78,7 @@ jobs:
           unzip -l hsahc_forceupdate_zygisk_module.zip | grep -q "zygisk/x86_64.so"
           unzip -l hsahc_forceupdate_zygisk_module.zip | grep -q "zygisk/x86.so"
           ls -lah
-          sha256sum hsahc_forceupdate_zygisk_module.zip > SHA256SUMS.txt
+          sha256sum hsahc_forceupdate_zygisk_module.zip INSTALL_ME_hsahc_forceupdate_zygisk_module.zip > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: Setup release metadata
@@ -100,6 +101,14 @@ jobs:
           name: ${{ env.RELEASE_NAME }}
           target_commitish: ${{ github.sha }}
           prerelease: true
+          body: |
+            安装请只下载：
+            - INSTALL_ME_hsahc_forceupdate_zygisk_module.zip
+
+            不要下载：
+            - Source code (zip)
+            - Source code (tar.gz)
           files: |
             out/hsahc_forceupdate_zygisk_module.zip
+            out/INSTALL_ME_hsahc_forceupdate_zygisk_module.zip
             out/SHA256SUMS.txt
