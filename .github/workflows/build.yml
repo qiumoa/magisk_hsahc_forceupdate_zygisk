@@ -39,10 +39,19 @@ jobs:
           echo "ui_print" > /proc/self/fd/$OUTFD
         }
 
-        unzip -o "$ZIPFILE" 'customize.sh' -d /tmp >&2
-        if [ -f /tmp/customize.sh ]; then
-          . /tmp/customize.sh
-        fi
+        ui_print "正在解压模块..."
+        MODPATH=/data/adb/modules/hsahc_forceupdate_zygisk
+        rm -rf "$MODPATH"
+        mkdir -p "$MODPATH"
+
+        unzip -o "$ZIPFILE" -d "$MODPATH" >&2
+
+        ui_print "设置权限..."
+        chmod 755 "$MODPATH/service.sh"
+        chmod 755 "$MODPATH/post-fs-data.sh"
+        chmod 755 "$MODPATH/customize.sh"
+
+        ui_print "安装完成，请重启设备"
         EOF
 
         echo "#MAGISK" > "$OUT_DIR/module/META-INF/com/google/android/updater-script"
