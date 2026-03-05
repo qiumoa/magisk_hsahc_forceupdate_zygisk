@@ -199,7 +199,6 @@ struct Il2CppApi {
 
 struct MethodInfoPatch {
   void *methodPointer;
-  void *virtualMethodPointer;
 };
 
 enum ReplaceAction : int {
@@ -249,13 +248,74 @@ bool makeWritable(void *addr) {
                   PROT_READ | PROT_WRITE | PROT_EXEC) == 0;
 }
 
-bool patchMethodPointer(const void *methodInfo, void *replace, const char *klass, const char *method,
-                        uint32_t paramCount) {
-  auto *m = reinterpret_cast<MethodInfoPatch *>(const_cast<void *>(methodInfo));
-  if (m == nullptr || m->methodPointer == nullptr || replace == nullptr) {
+bool isExecutableAddress(void *addr) {
+  if (addr == nullptr) {
     return false;
   }
-  if (m->methodPointer == replace) {
+  FILE *fp = fopen("/proc/self/maps", "r");
+  if (fp == nullptr) {
+    return false;
+  }
+  uintptr_t target = reinterpret_cast<uintptr_t>(addr);
+  char line[512] = {0};
+  bool exec = false;
+  while (fgets(line, sizeof(line), fp) != nullptr) {
+    unsigned long long start = 0;
+    unsigned long long end = 0;
+    char perms[8] = {0};
+    if (sscanf(line, "%llx-%llx %7s", &start, &end, perms) != 3) {
+      continue;
+    }
+    if (target >= start && target < end) {
+      exec = (strchr(perms, 'x') != nullptr);
+      break;
+    }
+  }
+  fclose(fp);
+  return exec;
+}
+
+bool patchCodeArm64(void *func, int action) {
+#if defined(__aarch64__)
+  if (func == nullptr) {
+    return false;
+  }
+  if (!makeWritable(func)) {
+    return false;
+  }
+  auto *p = reinterpret_cast<uint32_t *>(func);
+  if (action == kReturnFalse || action == kReturnZero) {
+    p[0] = 0x52800000U;  // mov w0, #0
+    p[1] = 0xD65F03C0U;  // ret
+    __builtin___clear_cache(reinterpret_cast<char *>(p), reinterpret_cast<char *>(p + 2));
+    return true;
+  }
+  if (action == kReturnVoid) {
+    p[0] = 0xD65F03C0U;  // ret
+    __builtin___clear_cache(reinterpret_cast<char *>(p), reinterpret_cast<char *>(p + 1));
+    return true;
+  }
+#else
+  (void)func;
+  (void)action;
+#endif
+  return false;
+}
+
+bool patchMethodPointer(const void *methodInfo, int action, void *replace, const char *klass, const char *method,
+                        uint32_t paramCount) {
+  auto *m = reinterpret_cast<MethodInfoPatch *>(const_cast<void *>(methodInfo));
+  if (m == nullptr || m->methodPointer == nullptr) {
+    return false;
+  }
+
+  void *entry = m->methodPointer;
+  if (isExecutableAddress(entry) && patchCodeArm64(entry, action)) {
+    LOGI("patched-code %s::%s(%u) entry=%p", klass, method, paramCount, entry);
+    return true;
+  }
+
+  if (replace == nullptr || m->methodPointer == replace) {
     return false;
   }
   if (!makeWritable(m)) {
@@ -265,16 +325,16 @@ bool patchMethodPointer(const void *methodInfo, void *replace, const char *klass
 
   void *old = m->methodPointer;
   m->methodPointer = replace;
-  if (m->virtualMethodPointer != nullptr) {
-    m->virtualMethodPointer = replace;
-  }
-  __builtin___clear_cache(reinterpret_cast<char *>(m), reinterpret_cast<char *>(m) + sizeof(MethodInfoPatch));
-  LOGI("patched %s::%s(%u) old=%p new=%p", klass, method, paramCount, old, replace);
+  __builtin___clear_cache(reinterpret_cast<char *>(m), reinterpret_cast<char *>(m + 1));
+  LOGI("patched-meta %s::%s(%u) old=%p new=%p", klass, method, paramCount, old, replace);
   return true;
 }
 
 bool resolveIl2cpp(Il2CppApi &api) {
   void *h = dlopen(kIl2cppSo, RTLD_NOW | RTLD_NOLOAD);
+  if (h == nullptr) {
+    h = dlopen(kIl2cppSo, RTLD_NOW);
+  }
   if (h == nullptr) {
     return false;
   }
@@ -333,6 +393,7 @@ int patchTargets(Il2CppApi &api, bool strictClass) {
   }
 
   int patched = 0;
+  int foundByName = 0;
   for (size_t i = 0; i < asmCount; i++) {
     const void *assembly = assemblies[i];
     if (assembly == nullptr) {
@@ -343,9 +404,7 @@ int patchTargets(Il2CppApi &api, bool strictClass) {
       continue;
     }
     const char *imgName = api.image_get_name(image);
-    if (imgName == nullptr || strstr(imgName, "Assembly-CSharp") == nullptr) {
-      continue;
-    }
+    (void)imgName;
 
     size_t classCount = api.image_get_class_count(image);
     for (size_t c = 0; c < classCount; c++) {
@@ -372,17 +431,22 @@ int patchTargets(Il2CppApi &api, bool strictClass) {
           if (strcmp(methodName, t.method) != 0) {
             continue;
           }
+          foundByName++;
           if (strictClass && !classMatch(klassName, klassNs, t.classKeyword)) {
             continue;
           }
           void *replace = resolveActionPtr(t.action);
-          if (patchMethodPointer(methodInfo, replace, klassName ? klassName : "<null>", methodName, paramCount)) {
+          if (patchMethodPointer(methodInfo, t.action, replace, klassName ? klassName : "<null>", methodName,
+                                 paramCount)) {
             t.hitCount++;
             patched++;
           }
         }
       }
     }
+  }
+  if (foundByName > 0 && patched == 0) {
+    LOGI("found target method names=%d but patch=0 (strict=%d)", foundByName, strictClass ? 1 : 0);
   }
   return patched;
 }
@@ -391,6 +455,9 @@ void *workerThread(void *) {
   for (int i = 0; i < kMaxRetry; i++) {
     Il2CppApi api{};
     if (!resolveIl2cpp(api)) {
+      if ((i % 10) == 0) {
+        LOGI("waiting il2cpp... retry=%d", i);
+      }
       sleep(kRetrySleepSec);
       continue;
     }

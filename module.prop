@@ -1,7 +1,7 @@
 id=hsahc_forceupdate_zygisk
 name=HSAHC ForceUpdate Bypass (Zygisk)
-version=v1.0.6
-versionCode=106
+version=v1.0.7
+versionCode=107
 author=qiumoa
 minMagisk=26000
 description=Zygisk il2cpp force-update bypass module for com.lta.hsahc.aligames
