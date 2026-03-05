@@ -33,9 +33,16 @@ jobs:
         #!/sbin/sh
         OUTFD=$2
         ZIPFILE=$3
-        ui_print() { echo -e "ui_print $1\nui_print" >> /proc/self/fd/$OUTFD; }
-        unzip -o "$ZIPFILE" -d $MODPATH >&2
-        ui_print "安装完成，请重启设备"
+
+        ui_print() {
+          echo "ui_print $1" > /proc/self/fd/$OUTFD
+          echo "ui_print" > /proc/self/fd/$OUTFD
+        }
+
+        unzip -o "$ZIPFILE" 'customize.sh' -d /tmp >&2
+        if [ -f /tmp/customize.sh ]; then
+          . /tmp/customize.sh
+        fi
         EOF
 
         echo "#MAGISK" > "$OUT_DIR/module/META-INF/com/google/android/updater-script"
